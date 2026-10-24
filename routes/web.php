@@ -5,6 +5,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ShipperDownloadController;
 use App\Http\Controllers\SiteController;
+use App\Http\Controllers\SiteIntegrationController;
 use App\Http\Controllers\SiteRealtimeController;
 use App\Http\Controllers\SiteTeamController;
 use App\Http\Controllers\SiteTokenController;
@@ -54,6 +55,8 @@ Route::middleware('auth')->group(function () {
             Route::get('/teams/{team}/sites/{site}/settings', [SiteController::class, 'edit'])->name('teams.sites.edit');
             Route::put('/teams/{team}/sites/{site}', [SiteController::class, 'update'])->name('teams.sites.update');
             Route::delete('/teams/{team}/sites/{site}', [SiteController::class, 'destroy'])->name('teams.sites.destroy');
+            Route::put('/teams/{team}/sites/{site}/integrations/stripe', [SiteIntegrationController::class, 'update'])->name('teams.sites.stripe.update');
+            Route::delete('/teams/{team}/sites/{site}/integrations/stripe', [SiteIntegrationController::class, 'destroy'])->name('teams.sites.stripe.destroy');
             Route::post('/teams/{team}/sites/{site}/token', [SiteTokenController::class, 'store'])->name('teams.sites.token.store');
             Route::put('/teams/{team}/sites/{site}/team', [SiteTeamController::class, 'update'])->name('teams.sites.team.update');
         });

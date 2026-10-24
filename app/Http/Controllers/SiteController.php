@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Analytics\SitePeriod;
 use App\Analytics\SiteSparklines;
+use App\Enums\IntegrationTool;
 use App\Http\Requests\SaveSiteRequest;
 use App\Ingest\ShipperSetup;
 use App\Models\Site;
@@ -88,7 +89,9 @@ class SiteController extends Controller
 
         return view('sites.edit', [
             'team' => $team,
-            'site' => $site->load('ingestStatus'),
+            'site' => $site->load('ingestStatus', 'integrations'),
+            'stripe' => $site->integrations->firstWhere('tool', IntegrationTool::Stripe),
+            'stripeEvents' => $site->hookEvents()->where('tool', IntegrationTool::Stripe)->latest('id')->limit(5)->get(),
             'otherTeams' => $otherTeams,
             'setup' => new ShipperSetup($site),
         ]);

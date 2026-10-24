@@ -16,6 +16,14 @@
     $daily = fn (TrafficGroup $group, string $figure) => $period->daily(fn ($day) => SitePeriod::figureOf($day, $group, $figure));
     $perVisit = fn ($figures) => $figures->readers > 0 ? $figures->views / $figures->readers : 0;
     $noEarlier = __('no whole period before to compare');
+    $revenue = $period->revenue();
+    $currency = array_key_first($revenue);
+    $showRevenue = $currency !== null || $site->integrations()->exists();
+    $signedIn = $period->signedInUsers();
+    $signedInBefore = $previous->signedInUsers();
+    $showUsers = $signedIn > 0 || $signedInBefore > 0;
+    $secondRow = 3 + ($showRevenue ? 1 : 0) + ($showUsers ? 1 : 0);
+    $otherCurrencies = collect($revenue)->except($currency)->map(fn ($money, $code) => \App\Integrations\Money::format($money['net'], $code))->implode(' · ');
     $tiers = $period->top(CountKind::EngineTier);
     $others = CountKind::OTHERS;
     $label = fn (string $name, string $fallback) => $name === $others ? __('(all others)') : $fallback;
@@ -104,7 +112,20 @@
                         :value="$engines->requests" :previous="$previous->group(TrafficGroup::AnswerEngines)->requests" :comparable="$comparable" :note="$noEarlier"
                         :series="$daily(TrafficGroup::AnswerEngines, 'requests')" color="var(--group-answer_engines)" />
                 </div>
-                <div class="mt-px grid grid-cols-2 gap-px lg:grid-cols-3">
+                <div @class(['mt-px grid grid-cols-2 gap-px', 'lg:grid-cols-3' => $secondRow === 3, 'lg:grid-cols-4' => $secondRow === 4, 'lg:grid-cols-5' => $secondRow === 5])>
+                    @if ($showRevenue)
+                        <x-kpi :label="__('Revenue')" :info="__('Live payments reported by Stripe, refunds taken off, in the currency most paid in. Never added across currencies.')"
+                            :value="$currency ? $revenue[$currency]['net'] : 0" format="money" :currency="$currency ?? 'eur'"
+                            :previous="$currency ? ($previous->revenue()[$currency]['net'] ?? 0) : null" :comparable="$comparable && $currency !== null" :note="$currency ? $noEarlier : __('no payment in this period')"
+                            :extra="$currency ? trans_choice(':count payment|:count payments', $revenue[$currency]['payments']).($otherCurrencies !== '' ? ' · '.__('also :amounts', ['amounts' => $otherCurrencies]) : '') : null"
+                            :series="$currency ? $period->dailyRevenue($currency) : []" color="var(--series-revenue)" />
+                    @endif
+                    @if ($showUsers)
+                        <x-kpi :label="__('Signed-in users')" :info="__('Distinct users your app named in the log\'s uid= field: someone seen on several days counts once.')"
+                            :value="$signedIn" :previous="$signedInBefore" :comparable="$comparable" :note="$noEarlier"
+                            :extra="__(':count visitors were signed in', ['count' => number_format($period->verified()->sum('signed_in_readers'))])"
+                            :series="$period->daily(fn ($day) => (int) $day->signed_in_users)" color="var(--series-visitors)" />
+                    @endif
                     <x-kpi :label="__('Pages per visit')" :info="__('Pages read divided by visitors.')"
                         :value="$perVisit($people)" format="ratio" :previous="$perVisit($before)" :comparable="$comparable" :note="$noEarlier"
                         :series="$period->daily(fn ($day) => SitePeriod::figureOf($day, TrafficGroup::People, 'readers') > 0 ? (int) round(SitePeriod::figureOf($day, TrafficGroup::People, 'views') / SitePeriod::figureOf($day, TrafficGroup::People, 'readers') * 10) : 0)" color="var(--series-visitors)" />

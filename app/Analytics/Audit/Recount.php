@@ -49,7 +49,8 @@ final class Recount
      */
     public function figures(): array
     {
-        $out = ['parsed' => 0, 'hits' => 0, 'other_hosts' => 0, 'cited_visits' => 0, 'tier.training' => 0, 'tier.asked' => 0];
+        $out = ['parsed' => 0, 'hits' => 0, 'other_hosts' => 0, 'cited_visits' => 0, 'tier.training' => 0, 'tier.asked' => 0,
+            'users.signed_in' => 0, 'people.signed_in_readers' => 0];
 
         foreach (self::GROUPS as $group) {
             foreach (['requests', 'views', 'visits', 'readers', 'probes'] as $figure) {
@@ -98,6 +99,10 @@ final class Recount
         $scanners = $this->scanners($lines);
         $flagged = $this->flaggedVisits($lines);
         $open = [];
+        $users = [];
+        $signedVisits = [];
+        $readVisits = [];
+        $visitNumber = 0;
 
         foreach ($lines as $line) {
             $out['hits']++;
@@ -131,7 +136,7 @@ final class Recount
             if ($visit === null || $this->gap < $line['t'] - $visit[0]
                 || ($outside && $visit[1] !== null && $visit[1] !== $origin)) {
                 $out["{$group}.visits"]++;
-                $visit = [$line['t'], null];
+                $visit = [$line['t'], null, ++$visitNumber];
             }
 
             $visit[0] = $line['t'];
@@ -143,10 +148,22 @@ final class Recount
                 if ($group === 'people' && $cited) {
                     $out['cited_visits']++;
                 }
+
+                if ($group === 'people') {
+                    $readVisits[$visit[2]] = true;
+                }
+            }
+
+            if ($group === 'people' && $line['uid'] !== '') {
+                $users[$line['uid']] = true;
+                $signedVisits[$visit[2]] = true;
             }
 
             $open[$id] = $visit;
         }
+
+        $out['users.signed_in'] = count($users);
+        $out['people.signed_in_readers'] = count(array_intersect_key($signedVisits, $readVisits));
 
         return $out;
     }
@@ -270,6 +287,12 @@ final class Recount
             $prefetch = $f[1];
         }
 
+        $user = '';
+
+        if (preg_match('~(?:^|\s)uid=([A-Za-z0-9_.:-]{1,128})(?=\s|$)~', $tail, $u) === 1 && $u[1] !== '-') {
+            $user = $u[1];
+        }
+
         $query = strpos($url, '?');
 
         return [
@@ -283,12 +306,13 @@ final class Recount
             'r' => $referrer === '-' ? '' : stripcslashes($referrer),
             'ua' => $agent === '-' ? '' : stripcslashes($agent),
             'pf' => $prefetch,
+            'uid' => $user,
         ];
     }
 
     private function withoutFields(string $tail): string
     {
-        return (string) preg_replace('~(?:^|\s)(?:rsc_prefetch|request_length)=\S*~', '', $tail);
+        return (string) preg_replace('~(?:^|\s)(?:rsc_prefetch|request_length|uid)=\S*~', '', $tail);
     }
 
     // ------------------------------------------------------- what it is

@@ -63,6 +63,14 @@ class SiteDay extends Model
     }
 
     /**
+     * @return HasMany<SiteDayUser, $this>
+     */
+    public function users(): HasMany
+    {
+        return $this->hasMany(SiteDayUser::class);
+    }
+
+    /**
      * Only the days whose figures may be shown: counted twice, and both roads agree.
      *
      * @param  Builder<SiteDay>  $query
@@ -90,6 +98,8 @@ class SiteDay extends Model
                 'other_hosts' => $figures->otherHosts,
                 'unfiltered' => $figures->unfiltered,
                 'cited_visits' => $figures->citedVisits,
+                'signed_in_users' => count($figures->users),
+                'signed_in_readers' => $figures->signedInReaders,
                 'first_seen' => $figures->firstSeen,
                 'last_seen' => $figures->lastSeen,
                 'partial_from' => $figures->partialFrom,
@@ -117,8 +127,51 @@ class SiteDay extends Model
                 SiteDayCount::query()->insert($chunk);
             }
 
+            $siteDay->users()->delete();
+            $users = array_map(
+                fn (string $uid, array $user) => ['site_day_id' => $siteDay->id, 'uid' => $uid, 'views' => $user['views']],
+                array_keys($figures->users),
+                $figures->users,
+            );
+
+            foreach (array_chunk($users, 500) as $chunk) {
+                SiteDayUser::query()->insert($chunk);
+            }
+
+            self::rememberUsers($site, $day, $figures);
+
             return $siteDay;
         });
+    }
+
+    /**
+     * Keep each user's first visit (the earliest seen, whatever order days
+     * are counted in) and the last day they were seen.
+     */
+    private static function rememberUsers(Site $site, string $day, DayFigures $figures): void
+    {
+        $known = $site->users()->whereIn('uid', array_keys($figures->users))->get()->keyBy('uid');
+
+        foreach ($figures->users as $uid => $user) {
+            $siteUser = $known[$uid] ?? null;
+            $first = [
+                'first_seen_at' => $user['first_seen'],
+                'first_source' => $user['source'],
+                'first_referrer' => $user['referrer'],
+                'first_landing' => $user['landing'],
+            ];
+
+            if ($siteUser === null) {
+                $site->users()->create(['uid' => (string) $uid, 'last_seen_day' => $day, ...$first]);
+
+                continue;
+            }
+
+            $siteUser->fill([
+                'last_seen_day' => max($siteUser->last_seen_day->toDateString(), $day),
+                ...($user['first_seen']->lessThan($siteUser->first_seen_at) ? $first : []),
+            ])->save();
+        }
     }
 
     /**
@@ -133,6 +186,8 @@ class SiteDay extends Model
             'hits' => $this->hits,
             'other_hosts' => $this->other_hosts,
             'cited_visits' => $this->cited_visits,
+            'users.signed_in' => $this->signed_in_users,
+            'people.signed_in_readers' => $this->signed_in_readers,
         ];
 
         $groups = $this->groups->keyBy('group');
@@ -147,6 +202,10 @@ class SiteDay extends Model
 
         foreach (EngineTier::cases() as $tier) {
             $core["tier.{$tier->value}"] = (int) ($tiers[$tier->value] ?? 0);
+        }
+
+        foreach ($this->counts->whereIn('kind', array_map(CountKind::from(...), CountKind::REVENUE)) as $row) {
+            $core["{$row->kind->value}.{$row->name}"] = (int) $row->count;
         }
 
         return $core;

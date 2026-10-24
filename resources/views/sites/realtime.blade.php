@@ -38,7 +38,9 @@
             @foreach ([
                 [__('Active now'), $live->activeNow, __('visitors, last 5 minutes'), __('Visitors with a request in the last 5 minutes.')],
                 [__('Last 30 minutes'), $live->recentVisitors, __('visitors with a request in them'), __('Visitors whose last request is less than 30 minutes old.')],
-                [__('Visitors today'), $live->visitorsToday, __('so far, the same count as Overview\'s'), null],
+                [__('Visitors today'), $live->visitorsToday, $live->signedInToday > 0
+                    ? __(':count signed-in users so far, :recent in the last 30 min', ['count' => number_format($live->signedInToday), 'recent' => number_format($live->signedInRecent)])
+                    : __('so far, the same count as Overview\'s'), null],
                 [__('Pages read, 30 min'), $live->pagesRecent, __('page views by visitors'), null],
             ] as [$label, $value, $note, $info])
                 <div class="bg-surface px-4 py-3">
@@ -117,6 +119,9 @@
                                     {{ $visit['country'] === 'Unknown' ? '' : $visit['country'].', ' }}{{ __($visit['device']) }}
                                     {{ $visit['from'] ? __('from :source', ['source' => $visit['from']]) : '· '.__('Direct') }}:
                                     {{ trans_choice(':count page so far|:count pages so far', $visit['pages']) }}
+                                    @if ($visit['signed_in'] ?? false)
+                                        <span class="ml-1 rounded-full bg-sunk px-1.5 text-[11px] text-ink-2">{{ __('signed in') }}</span>
+                                    @endif
                                     @if ($visit['active'] === 'now')
                                         <span class="ml-1 rounded-full border border-[color-mix(in_srgb,var(--good)_40%,var(--rule))] px-1.5 text-[11px] text-good">{{ __('active now') }}</span>
                                     @elseif ($visit['active'] === 'recent')

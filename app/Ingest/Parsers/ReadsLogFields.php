@@ -63,6 +63,15 @@ trait ReadsLogFields
     }
 
     /**
+     * The signed-in user the site's app named in the uid= field (an opaque,
+     * pseudonymous id: letters, digits and _ . : -), or '' when none.
+     */
+    protected function userId(?string $value): string
+    {
+        return $value !== null && preg_match('/^[A-Za-z0-9_.:-]{1,128}$/', $value) === 1 && $value !== '-' ? $value : '';
+    }
+
+    /**
      * A value logged as "-" (or nothing) means the field was empty.
      */
     protected function orEmpty(string $value): string

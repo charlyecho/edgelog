@@ -75,6 +75,30 @@
             </x-slot:after>
         </x-card>
 
+        <x-card :title="__('Signed-in users')" :description="__('When your app knows who is signed in, it can name them in the log: Edgelog then counts signed-in users across days and devices, and links their payments to where they first came from.')">
+            <ol class="grid gap-4">
+                <li class="grid gap-1.5">
+                    <p><span class="font-semibold">1.</span> {{ __('Your app sends a pseudonymous id of the signed-in user in the :header response header. Never the raw id or an email: a keyed hash, as here.', ['header' => \App\Ingest\UserTrackingSetup::HEADER]) }}</p>
+                    <x-code :code="\App\Ingest\UserTrackingSetup::laravel()" />
+                    <p class="text-xs text-ink-3">{{ __('Without Laravel:') }}</p>
+                    <x-code :code="\App\Ingest\UserTrackingSetup::php()" />
+                </li>
+                <li class="grid gap-1.5">
+                    <p><span class="font-semibold">2.</span> {{ __('The web server writes it at the end of the log line as uid=, and takes it off the response, so the browser never sees it.') }}</p>
+                    <x-code :code="\App\Ingest\UserTrackingSetup::nginx()" />
+                    <p class="text-xs text-ink-3">{{ __('Apache:') }}</p>
+                    <x-code :code="\App\Ingest\UserTrackingSetup::apache()" />
+                </li>
+                <li>
+                    <p><span class="font-semibold">3.</span> {{ __('For Stripe, pass the same id as the Checkout Session\'s client_reference_id (or metadata.uid, and the subscription\'s metadata.uid).') }}</p>
+                </li>
+            </ol>
+
+            <x-slot:after>
+                <p class="text-[13px] text-ink-3">{{ __('A pseudonymous id is still personal data: say so in your privacy notice. Ids are kept :days days.', ['days' => config('analytics.users_kept_days')]) }}</p>
+            </x-slot:after>
+        </x-card>
+
         <x-card :title="__('Connection')" :description="__('What the address last answered for this site.')">
             @php($status = $site->ingestStatus)
 
@@ -105,6 +129,53 @@
             @endif
 
             <div class="mt-4"><x-button variant="secondary" size="sm" :href="route('teams.sites.edit', [$team, $site])">{{ __('Check again') }}</x-button></div>
+        </x-card>
+
+        <x-card :title="__('Revenue from Stripe')" :description="__('Stripe sends a signed event for each payment and refund; the site\'s revenue is counted by day and by currency, live payments only. No customer name, email or address is kept.')">
+            <ol class="grid gap-3">
+                <li>
+                    <p><span class="font-semibold">1.</span> {{ __('In Stripe, Developers > Webhooks > Add endpoint, with this address:') }}</p>
+                    <x-copy-field :value="route('hooks.stripe', $site)" />
+                </li>
+                <li>
+                    <p><span class="font-semibold">2.</span> {{ __('Select these events:') }}</p>
+                    <x-code :code="implode(\PHP_EOL, \App\Integrations\Stripe\StripeEvents::TYPES)" class="mt-2" />
+                </li>
+                <li>
+                    <p><span class="font-semibold">3.</span> {{ __('Copy the endpoint\'s signing secret (whsec_...) here:') }}</p>
+                    <form method="POST" action="{{ route('teams.sites.stripe.update', [$team, $site]) }}" class="mt-2 flex flex-wrap items-end gap-3">
+                        @csrf
+                        @method('PUT')
+                        <div class="min-w-64 flex-1">
+                            <x-input :label="__('Signing secret')" name="secret" type="password" autocomplete="off" :placeholder="$stripe ? __('Saved. Paste a new one to replace it.') : 'whsec_...'" required />
+                        </div>
+                        <x-button variant="secondary">{{ $stripe ? __('Replace the secret') : __('Connect Stripe') }}</x-button>
+                    </form>
+                </li>
+            </ol>
+
+            @if ($stripe)
+                <div class="mt-4 grid gap-1.5 border-t border-grid pt-4 text-[13px]">
+                    <p class="text-ink-2">
+                        {{ __('Last event received:') }}
+                        <span class="font-semibold text-ink">{{ $stripe->last_received_at?->diffForHumans() ?? __('none yet') }}</span>
+                    </p>
+                    @if ($stripe->last_refusal && (! $stripe->last_received_at || $stripe->last_refused_at?->greaterThan($stripe->last_received_at)))
+                        <p class="text-bad">{{ __('Last refusal, :when: :why', ['when' => $stripe->last_refused_at->diffForHumans(), 'why' => $stripe->last_refusal]) }}</p>
+                    @endif
+                    @foreach ($stripeEvents as $event)
+                        <p class="font-mono text-[12px] text-ink-3">
+                            {{ $event->occurred_at->setTimezone($site->timezone)->format('Y-m-d H:i') }} · {{ $event->type }}
+                            @unless ($event->livemode) · {{ __('test mode, not counted') }} @endunless
+                        </p>
+                    @endforeach
+                    <form method="POST" action="{{ route('teams.sites.stripe.destroy', [$team, $site]) }}" class="mt-2" onsubmit="return confirm(@js(__('Disconnect Stripe? Its address stops taking events; the revenue already counted stays.')))">
+                        @csrf
+                        @method('DELETE')
+                        <x-button variant="danger" size="sm">{{ __('Disconnect Stripe') }}</x-button>
+                    </form>
+                </div>
+            @endif
         </x-card>
 
         <x-card :title="__('Team')" :description="__('The site belongs to :team. You can move it to another team where you are an owner or admin.', ['team' => $team->name])">

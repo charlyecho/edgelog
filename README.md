@@ -209,6 +209,55 @@ addresses, your own traffic (lists of addresses and agents), countries from a Ge
 returning visitors, the "likely sent by an AI assistant" estimate, the world map, the Insights
 tab and the daily mail.
 
+## Signed-in users
+
+When the site's app knows who is signed in, it can name them in the log (**Site settings >
+Signed-in users** has the code):
+
+1. The app sends a pseudonymous id of the user in the `X-Edgelog-User` response header: a keyed
+   hash such as `hash_hmac('sha256', $userId, $appSecret)`, never the raw id or an email.
+2. The web server writes it at the end of the line, ` uid=$upstream_http_x_edgelog_user` in
+   nginx's `log_format` (Apache: ` uid=%{X-Edgelog-User}o`), and takes the header off the response
+   (`fastcgi_hide_header` / `proxy_hide_header`; Apache: `Header always unset`), so the browser
+   never sees it.
+
+Edgelog then counts, each day, the distinct signed-in users and the visitors who were signed in
+(a visit that signs in on its second page counts whole), both recounted by the audit. A user is
+counted once over a period, however many days they came. Each user's first visit is kept, with
+where it came from, for crediting their payments later: pass the same id to Stripe as the Checkout
+Session's `client_reference_id` (or `metadata.uid`, and the subscription's `metadata.uid`), and
+the payment keeps it. Ids are kept `ANALYTICS_USERS_KEPT_DAYS` (400) days; a day's counts stay.
+A pseudonymous id is still personal data: say so in the site's privacy notice.
+
+## Revenue from Stripe
+
+Each site can count its revenue from Stripe's signed webhooks (**Site settings > Revenue from
+Stripe**):
+
+1. In Stripe, **Developers > Webhooks > Add endpoint**, with the site's address
+   `https://edgelog.example.com/hooks/<site uuid>/stripe` and the events
+   `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `invoice.paid`,
+   `refund.created` and `refund.updated`.
+2. Paste the endpoint's signing secret (`whsec_...`) in the site settings. It is stored encrypted.
+
+What is counted:
+
+- A one-time payment, from its Checkout Session (mode `payment`) once paid, at once or later by a
+  delayed method. A subscription's payments, the first one included, from `invoice.paid` (its
+  Checkout Session is not counted, or the first payment would count twice). A refund once it
+  succeeded, taken off.
+- Live payments only: test-mode events are received and listed in the settings, never counted.
+- By day and by currency, never added across currencies. A payment belongs to the day of its first
+  event; one Stripe delivers late (it retries for three days) counts its day again.
+- The signature (`Stripe-Signature`, 5 minutes of tolerance) is checked on the raw body before
+  anything else; each event is kept once. Only the fields the counts read are kept: never the
+  customer's name, email or address. The audit recounts the day's revenue from the kept events
+  by its own code.
+
+Revenue is not linked to visits yet: the site's figures and its revenue sit side by side. For
+defence in depth, allow only [Stripe's addresses](https://docs.stripe.com/ips.md) on
+`/hooks/*/stripe` in nginx.
+
 ## Tests
 
 ```sh

@@ -26,6 +26,7 @@ final readonly class LogHit
         public string $requestId = '',
         public ?string $rscPrefetch = null,
         public ?int $requestLength = null,
+        public string $userId = '',
     ) {}
 
     /**

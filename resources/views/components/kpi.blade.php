@@ -1,7 +1,11 @@
-@props(['label', 'value', 'previous' => null, 'comparable' => false, 'format' => 'number', 'series' => [], 'color' => 'var(--series-visitors)', 'note' => null, 'info' => null])
+@props(['label', 'value', 'previous' => null, 'comparable' => false, 'format' => 'number', 'currency' => null, 'series' => [], 'color' => 'var(--series-visitors)', 'note' => null, 'info' => null, 'extra' => null])
 
 @php
-    $show = fn ($number) => $format === 'ratio' ? number_format($number, 1) : number_format($number);
+    $show = fn ($number) => match ($format) {
+        'ratio' => number_format($number, 1),
+        'money' => \App\Integrations\Money::format((int) $number, $currency),
+        default => number_format($number),
+    };
     $change = null;
 
     if ($comparable && $previous !== null && $previous > 0) {
@@ -27,6 +31,10 @@
             {{ $note }}
         @endif
     </p>
+
+    @if ($extra)
+        <p class="mt-0.5 text-xs text-ink-3">{{ $extra }}</p>
+    @endif
 
     <x-sparkline :values="$series" :color="$color" />
 </div>

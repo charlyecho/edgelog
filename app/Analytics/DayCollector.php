@@ -5,7 +5,10 @@ namespace App\Analytics;
 use App\Analytics\Classification\Classifier;
 use App\Analytics\Classification\VisitEvidence;
 use App\Analytics\Tally\DayTally;
+use App\Enums\ConversionAction;
+use App\Enums\CountKind;
 use App\Ingest\IngestLog;
+use App\Models\Conversion;
 use App\Models\Site;
 
 /**
@@ -58,10 +61,32 @@ final class DayCollector
         }
 
         $figures = $tally->finish();
+        $this->addRevenue($site, $window, $figures);
         $figures->parsed = $reader->lines;
         $figures->unparsed = $reader->unparsed;
         $figures->partialFrom = $reader->reachesBack ? null : $figures->firstSeen;
 
         return $figures;
+    }
+
+    /**
+     * The money the site's tools reported for the day, live payments only,
+     * by currency: paid, refunded (as a positive amount) and how many payments.
+     */
+    private function addRevenue(Site $site, DayWindow $window, DayFigures $figures): void
+    {
+        $site->conversions()
+            ->where('livemode', true)
+            ->where('occurred_at', '>=', $window->start)
+            ->where('occurred_at', '<', $window->end)
+            ->get()
+            ->each(function (Conversion $conversion) use ($figures) {
+                if ($conversion->action === ConversionAction::Paid) {
+                    $figures->count(CountKind::RevenuePaid, $conversion->currency, $conversion->amount);
+                    $figures->count(CountKind::Payments, $conversion->currency);
+                } else {
+                    $figures->count(CountKind::RevenueRefunded, $conversion->currency, abs($conversion->amount));
+                }
+            });
     }
 }

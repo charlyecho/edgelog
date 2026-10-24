@@ -20,6 +20,13 @@ final class LiveSnapshot
 
     public int $bots = 0;
 
+    /**
+     * Distinct signed-in users today, and those of them active in the last 30 minutes.
+     */
+    public int $signedInToday = 0;
+
+    public int $signedInRecent = 0;
+
     public int $firstMinute = 0;
 
     /**
@@ -45,7 +52,7 @@ final class LiveSnapshot
     public array $countries = [];
 
     /**
-     * @var list<array{started: int, country: string, device: string, from: ?string, pages: int, landing: ?string, active: ?string}>
+     * @var list<array{started: int, country: string, device: string, from: ?string, pages: int, landing: ?string, active: ?string, signed_in: bool}>
      */
     public array $newest = [];
 
@@ -67,6 +74,8 @@ final class LiveSnapshot
             'visitors_today' => $this->visitorsToday,
             'pages_recent' => $this->pagesRecent,
             'bots' => $this->bots,
+            'signed_in_today' => $this->signedInToday,
+            'signed_in_recent' => $this->signedInRecent,
             'first_minute' => $this->firstMinute,
             'visitors_by_minute' => $this->visitorsByMinute,
             'requests_by_minute' => $this->requestsByMinute,
@@ -87,6 +96,8 @@ final class LiveSnapshot
         $snapshot->visitorsToday = $values['visitors_today'];
         $snapshot->pagesRecent = $values['pages_recent'];
         $snapshot->bots = $values['bots'];
+        $snapshot->signedInToday = $values['signed_in_today'] ?? 0;
+        $snapshot->signedInRecent = $values['signed_in_recent'] ?? 0;
         $snapshot->firstMinute = $values['first_minute'];
         $snapshot->visitorsByMinute = $values['visitors_by_minute'];
         $snapshot->requestsByMinute = $values['requests_by_minute'];

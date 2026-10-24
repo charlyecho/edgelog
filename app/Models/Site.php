@@ -82,6 +82,46 @@ class Site extends Model
     }
 
     /**
+     * Get the tools connected to the site.
+     *
+     * @return HasMany<SiteIntegration, $this>
+     */
+    public function integrations(): HasMany
+    {
+        return $this->hasMany(SiteIntegration::class);
+    }
+
+    /**
+     * Get the verified webhook events of the site's tools.
+     *
+     * @return HasMany<HookEvent, $this>
+     */
+    public function hookEvents(): HasMany
+    {
+        return $this->hasMany(HookEvent::class);
+    }
+
+    /**
+     * Get the site's signed-in users, by the id its app logs.
+     *
+     * @return HasMany<SiteUser, $this>
+     */
+    public function users(): HasMany
+    {
+        return $this->hasMany(SiteUser::class);
+    }
+
+    /**
+     * Get the money the site's tools reported.
+     *
+     * @return HasMany<Conversion, $this>
+     */
+    public function conversions(): HasMany
+    {
+        return $this->hasMany(Conversion::class);
+    }
+
+    /**
      * Get what the ingest endpoint last answered for the site.
      *
      * @return HasOne<IngestStatus, $this>

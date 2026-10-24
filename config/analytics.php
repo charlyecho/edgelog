@@ -32,4 +32,8 @@ return [
     // A visit ends after this long without a request.
     'visit_gap_minutes' => 30,
 
+    // Days a signed-in user's id is kept: the users of each day, and a user
+    // not seen for this long is forgotten.
+    'users_kept_days' => (int) env('ANALYTICS_USERS_KEPT_DAYS', 400),
+
 ];

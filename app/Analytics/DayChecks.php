@@ -49,6 +49,10 @@ final class DayChecks
         }
 
         $people = $figures->group(TrafficGroup::People);
+
+        if ($figures->signedInReaders > $people->readers) {
+            $problems[] = __('More signed-in visitors than visitors.');
+        }
         $parents = [
             CountKind::PeoplePage->value => $people->views,
             CountKind::PeopleLanding->value => $people->readers,

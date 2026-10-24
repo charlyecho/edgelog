@@ -8,6 +8,7 @@ use App\Enums\TrafficGroup;
 use App\Models\Site;
 use App\Models\SiteDay;
 use App\Models\SiteDayCount;
+use App\Models\SiteDayUser;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonPeriod;
 use Illuminate\Support\Collection;
@@ -41,6 +42,13 @@ final class SitePeriod
      * @var array<string, array<string, int>>
      */
     private array $counts = [];
+
+    /**
+     * Each verified day's money: [day id][kind][currency] => amount.
+     *
+     * @var array<int, array<string, array<string, int>>>
+     */
+    private array $money = [];
 
     public function __construct(public readonly Site $site, public readonly CarbonImmutable $first, public readonly CarbonImmutable $last)
     {
@@ -172,6 +180,18 @@ final class SitePeriod
     }
 
     /**
+     * The distinct signed-in users of the verified days: a user seen on
+     * several days counts once, never once a day.
+     */
+    public function signedInUsers(): int
+    {
+        return SiteDayUser::query()
+            ->whereIn('site_day_id', $this->verified()->pluck('id'))
+            ->distinct()
+            ->count('uid');
+    }
+
+    /**
      * A breakdown over the verified days: its top rows, the rest folded into one.
      *
      * @return array<string, int>
@@ -191,6 +211,42 @@ final class SitePeriod
         }
 
         return $kept;
+    }
+
+    /**
+     * The money of the verified days, by currency, largest revenue first:
+     * paid, refunded (positive), net, and how many payments.
+     *
+     * @return array<string, array{paid: int, refunded: int, net: int, payments: int}>
+     */
+    public function revenue(): array
+    {
+        $currencies = array_unique([
+            ...array_keys($this->counts[CountKind::RevenuePaid->value] ?? []),
+            ...array_keys($this->counts[CountKind::RevenueRefunded->value] ?? []),
+        ]);
+        $revenue = [];
+
+        foreach ($currencies as $currency) {
+            $paid = $this->counts[CountKind::RevenuePaid->value][$currency] ?? 0;
+            $refunded = $this->counts[CountKind::RevenueRefunded->value][$currency] ?? 0;
+            $revenue[$currency] = ['paid' => $paid, 'refunded' => $refunded, 'net' => $paid - $refunded, 'payments' => $this->counts[CountKind::Payments->value][$currency] ?? 0];
+        }
+
+        uasort($revenue, fn (array $a, array $b) => $b['paid'] <=> $a['paid']);
+
+        return $revenue;
+    }
+
+    /**
+     * The net revenue of each day in one currency, oldest first; null for a day without figures.
+     *
+     * @return list<?int>
+     */
+    public function dailyRevenue(string $currency): array
+    {
+        return $this->daily(fn (SiteDay $day) => ($this->money[$day->id][CountKind::RevenuePaid->value][$currency] ?? 0)
+            - ($this->money[$day->id][CountKind::RevenueRefunded->value][$currency] ?? 0));
     }
 
     /**
@@ -267,6 +323,14 @@ final class SitePeriod
             ->get()
             ->each(function (object $row) {
                 $this->counts[$row->kind][$row->name] = (int) $row->total;
+            });
+
+        SiteDayCount::query()
+            ->whereIn('site_day_id', $verified->pluck('id'))
+            ->whereIn('kind', CountKind::REVENUE)
+            ->get()
+            ->each(function (SiteDayCount $row) {
+                $this->money[$row->site_day_id][$row->kind->value][$row->name] = (int) $row->count;
             });
     }
 }

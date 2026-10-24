@@ -30,6 +30,19 @@ final class DayFigures
 
     public int $citedVisits = 0;
 
+    /**
+     * Signed-in people's visits that read a page.
+     */
+    public int $signedInReaders = 0;
+
+    /**
+     * Each signed-in user of the day: their page views, and where the day's
+     * first visit they were signed in came from.
+     *
+     * @var array<string, array{views: int, source: ?string, referrer: ?string, landing: ?string, first_seen: CarbonImmutable}>
+     */
+    public array $users = [];
+
     public ?CarbonImmutable $firstSeen = null;
 
     public ?CarbonImmutable $lastSeen = null;
@@ -78,6 +91,10 @@ final class DayFigures
     public function fold(int $top = self::TOP): void
     {
         foreach ($this->counts as $kind => $rows) {
+            if (in_array($kind, CountKind::REVENUE, true)) {
+                continue;
+            }
+
             arsort($rows);
 
             if (count($rows) > $top) {
@@ -102,6 +119,8 @@ final class DayFigures
             'hits' => $this->hits,
             'other_hosts' => $this->otherHosts,
             'cited_visits' => $this->citedVisits,
+            'users.signed_in' => count($this->users),
+            'people.signed_in_readers' => $this->signedInReaders,
         ];
 
         foreach ($this->groups as $group => $figures) {
@@ -112,6 +131,12 @@ final class DayFigures
 
         foreach (EngineTier::cases() as $tier) {
             $core["tier.{$tier->value}"] = $this->countsOf(CountKind::EngineTier)[$tier->value] ?? 0;
+        }
+
+        foreach (CountKind::REVENUE as $kind) {
+            foreach ($this->counts[$kind] ?? [] as $currency => $value) {
+                $core["{$kind}.{$currency}"] = $value;
+            }
         }
 
         return $core;

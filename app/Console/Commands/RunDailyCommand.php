@@ -6,6 +6,9 @@ use App\Analytics\DayWindow;
 use App\Jobs\AuditSiteDay;
 use App\Jobs\CollectSiteDay;
 use App\Models\Site;
+use App\Models\SiteDay;
+use App\Models\SiteDayUser;
+use App\Models\SiteUser;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
@@ -40,8 +43,21 @@ class RunDailyCommand extends Command
             $queued++;
         });
 
+        $this->forgetOldUsers();
         $this->components->info("Queued {$queued} site days.");
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Signed-in users' ids are kept users_kept_days, no longer: the days'
+     * lists of users, and the users not seen since. The day's counts stay.
+     */
+    private function forgetOldUsers(): void
+    {
+        $before = now()->subDays((int) config('analytics.users_kept_days'))->toDateString();
+
+        SiteDayUser::query()->whereIn('site_day_id', SiteDay::query()->where('day', '<', $before)->select('id'))->delete();
+        SiteUser::query()->where('last_seen_day', '<', $before)->delete();
     }
 }

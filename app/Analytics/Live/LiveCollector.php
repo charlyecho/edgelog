@@ -97,7 +97,18 @@ final class LiveCollector
             }
         }
 
+        $signedIn = [];
+        $signedInRecent = [];
+
         foreach ([...$visits, ...array_values($open)] as $visit) {
+            foreach ($visit['users'] as $uid => $true) {
+                $signedIn[$uid] = true;
+
+                if ($visit['last'] >= $nowTime - self::RECENT_SECONDS) {
+                    $signedInRecent[$uid] = true;
+                }
+            }
+
             if ($visit['pages'] === 0) {
                 continue;
             }
@@ -129,8 +140,12 @@ final class LiveCollector
                 'pages' => $visit['pages'],
                 'landing' => $visit['landing'],
                 'active' => $active ? 'now' : ($recent ? 'recent' : null),
+                'signed_in' => $visit['users'] !== [],
             ];
         }
+
+        $snapshot->signedInToday = count($signedIn);
+        $snapshot->signedInRecent = count($signedInRecent);
 
         $snapshot->firstMinute = $firstMinute;
         $snapshot->requestsByMinute = $requestsByMinute;
@@ -170,10 +185,14 @@ final class LiveCollector
 
             $visit = ['start' => $time, 'last' => $time, 'pages' => 0, 'origin' => null, 'landing' => null,
                 'source' => null, 'from' => null, 'country' => $hit->country ?: 'Unknown',
-                'device' => UserAgentLabels::device($hit->userAgent)];
+                'device' => UserAgentLabels::device($hit->userAgent), 'users' => []];
         }
 
         $visit['last'] = max($visit['last'], $time);
+
+        if ($hit->userId !== '') {
+            $visit['users'][$hit->userId] = true;
+        }
 
         if ($isPage) {
             $visit['pages']++;

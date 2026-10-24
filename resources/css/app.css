@@ -27,6 +27,7 @@
     --group-ours: #e87ba4;
     --series-visitors: #2a78d6;
     --series-pages: #008300;
+    --series-revenue: #b02a86;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -52,6 +53,7 @@
         --group-ours: #d55181;
         --series-visitors: #3987e5;
         --series-pages: #2fa52f;
+        --series-revenue: #d55aae;
     }
 }
 

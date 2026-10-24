@@ -24,6 +24,27 @@ final class DayTally
      */
     private array $visits = [];
 
+    /**
+     * People's visits that read a page, by visit number: where they came from.
+     *
+     * @var array<int, array{source: string, referrer: string, landing: string}>
+     */
+    private array $readerVisits = [];
+
+    /**
+     * People's visits a signed-in user made, by visit number.
+     *
+     * @var array<int, true>
+     */
+    private array $signedInVisits = [];
+
+    /**
+     * Each signed-in user's first visit of the day.
+     *
+     * @var array<string, int>
+     */
+    private array $firstVisitOf = [];
+
     public function __construct(private readonly Sources $sources, int $gapSeconds = 1800)
     {
         $this->figures = new DayFigures;
@@ -82,12 +103,36 @@ final class DayTally
             $this->figures->groups[$group]->readers = $counter->readers;
         }
 
+        $this->figures->signedInReaders = count(array_intersect_key($this->signedInVisits, $this->readerVisits));
+
+        foreach ($this->figures->users as $uid => &$user) {
+            $origin = $this->readerVisits[$this->firstVisitOf[$uid]] ?? null;
+            $user['source'] = $origin['source'] ?? null;
+            $user['referrer'] = $origin['referrer'] ?? null;
+            $user['landing'] = $origin['landing'] ?? null;
+        }
+
         $this->figures->fold();
 
         return $this->figures;
     }
 
     private function person(LogHit $hit, Verdict $verdict, string $key, int $time, bool $isPage, string $path): void
+    {
+        $this->personVisit($hit, $verdict, $key, $time, $isPage, $path);
+
+        if ($hit->userId === '') {
+            return;
+        }
+
+        $visit = $this->visits[TrafficGroup::People->value]->visitOf($key);
+        $this->signedInVisits[$visit] = true;
+        $this->firstVisitOf[$hit->userId] ??= $visit;
+        $this->figures->users[$hit->userId] ??= ['views' => 0, 'source' => null, 'referrer' => null, 'landing' => null, 'first_seen' => $hit->when];
+        $this->figures->users[$hit->userId]['views'] += $isPage ? 1 : 0;
+    }
+
+    private function personVisit(LogHit $hit, Verdict $verdict, string $key, int $time, bool $isPage, string $path): void
     {
         if (! $isPage) {
             $this->visits[TrafficGroup::People->value]->add($key, $time);
@@ -113,6 +158,11 @@ final class DayTally
             return;
         }
 
+        $this->readerVisits[$this->visits[TrafficGroup::People->value]->visitOf($key)] = [
+            'source' => $source->value,
+            'referrer' => $referrer,
+            'landing' => $path,
+        ];
         $this->figures->count(CountKind::PeopleLanding, $path);
         $this->figures->count(CountKind::PeopleSource, $source->value);
         $this->figures->count(CountKind::PeopleReferrer, $referrer);

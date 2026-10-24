@@ -15,7 +15,7 @@ final class VisitCounter
     public int $readers = 0;
 
     /**
-     * @var array<string, array{last: int, origin: ?string}>
+     * @var array<string, array{last: int, origin: ?string, id: int}>
      */
     private array $open = [];
 
@@ -38,7 +38,7 @@ final class VisitCounter
 
         if ($isNew) {
             $this->visits++;
-            $visit = ['last' => $time, 'origin' => null];
+            $visit = ['last' => $time, 'origin' => null, 'id' => $this->visits];
         }
 
         $visit['last'] = max($visit['last'], $time);
@@ -52,5 +52,13 @@ final class VisitCounter
         $this->open[$key] = $visit;
 
         return $firstPage;
+    }
+
+    /**
+     * The number of the visit the key's last request belongs to (1 for the day's first visit).
+     */
+    public function visitOf(string $key): ?int
+    {
+        return $this->open[$key]['id'] ?? null;
     }
 }

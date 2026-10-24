@@ -24,6 +24,14 @@ enum CountKind: string
     case SearchPage = 'search_page';
     case BotAgent = 'bot_agent';
     case OtherHost = 'other_host';
+    case RevenuePaid = 'revenue_paid';
+    case RevenueRefunded = 'revenue_refunded';
+    case Payments = 'payments';
+
+    /**
+     * The breakdowns of money, by currency (never added across currencies).
+     */
+    public const array REVENUE = ['revenue_paid', 'revenue_refunded', 'payments'];
 
     /**
      * The name a folded tail is kept under.
@@ -52,6 +60,9 @@ enum CountKind: string
             self::SearchPage => __('Pages search engines fetched'),
             self::BotAgent => __('Bots and scanners'),
             self::OtherHost => __('Other hosts, left out'),
+            self::RevenuePaid => __('Revenue'),
+            self::RevenueRefunded => __('Refunds'),
+            self::Payments => __('Payments'),
         };
     }
 
@@ -64,6 +75,8 @@ enum CountKind: string
             self::PeoplePage => __('pages read'),
             self::PeopleLanding, self::PeopleSource, self::PeopleReferrer, self::PeopleCampaign,
             self::PeopleCountry, self::PeopleDevice, self::PeopleBrowser, self::CitedBy => __('visitors'),
+            self::RevenuePaid, self::RevenueRefunded => __('in the currency\'s minor unit'),
+            self::Payments => __('payments'),
             default => __('requests'),
         };
     }

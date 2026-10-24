@@ -12,7 +12,7 @@ use App\Ingest\LogHit;
  *
  * Many servers add fields after it; these are read when present: the time
  * taken right after the user agent, a quoted host name as the very last
- * field, rsc_prefetch= and request_length=.
+ * field, rsc_prefetch=, request_length= and uid= (the signed-in user).
  */
 final readonly class CombinedLogParser implements LogLineParser
 {
@@ -38,6 +38,7 @@ final readonly class CombinedLogParser implements LogLineParser
         $tail = $fields['tail'];
         $rscPrefetch = $this->takeField($tail, 'rsc_prefetch');
         $requestLength = $this->takeField($tail, 'request_length');
+        $userId = $this->takeField($tail, 'uid');
         $requestTime = preg_match('/^\s+(\d+(?:\.\d+)?)(?=\s|$)/', $tail, $time) === 1 ? $time[1] : null;
         $host = preg_match('/\s"((?=[^"]*[A-Za-z])[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)(?::\d+)?"\s*$/', $tail, $found) === 1
             ? strtolower($found[1])
@@ -59,6 +60,7 @@ final readonly class CombinedLogParser implements LogLineParser
             size: $this->bytes($fields['size']),
             rscPrefetch: $rscPrefetch,
             requestLength: $this->bytes($requestLength),
+            userId: $this->userId($userId),
         );
     }
 }

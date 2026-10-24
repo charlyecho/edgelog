@@ -40,6 +40,7 @@ final readonly class ExtendedLogParser implements LogLineParser
         $tail = $fields['tail'];
         $rscPrefetch = $this->takeField($tail, 'rsc_prefetch');
         $requestLength = $this->takeField($tail, 'request_length');
+        $userId = $this->takeField($tail, 'uid');
         $requestId = $this->takeField($tail, 'rid');
         $country = $this->takeField($tail, 'cc');
         $requestTime = preg_match('/^\s+(\S+)/', $tail, $time) === 1 ? $time[1] : null;
@@ -62,6 +63,7 @@ final readonly class ExtendedLogParser implements LogLineParser
             requestId: preg_match('/^[0-9A-Za-z-]{8,64}$/', (string) $requestId) === 1 ? $requestId : '',
             rscPrefetch: $rscPrefetch,
             requestLength: $this->bytes($requestLength),
+            userId: $this->userId($userId),
         );
     }
 }

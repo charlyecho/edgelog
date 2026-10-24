@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Analytics\Audit\Comparison;
 use App\Analytics\Audit\Recount;
+use App\Analytics\Audit\RevenueRecount;
 use App\Analytics\DayWindow;
 use App\Analytics\SiteHosts;
 use App\Enums\DayStatus;
@@ -51,7 +52,9 @@ class AuditSiteDay implements ShouldBeUnique, ShouldQueue
             (int) config('analytics.too_fast_seconds'),
         );
 
-        $differences = Comparison::differences($siteDay->core(), $recount->figures());
+        $window = new DayWindow($this->day, $siteDay->timezone);
+        $recounted = [...$recount->figures(), ...(new RevenueRecount($this->site->id, $window))->figures()];
+        $differences = Comparison::differences($siteDay->core(), $recounted);
 
         $siteDay->update([
             'status' => $differences === [] ? DayStatus::Verified : DayStatus::Withheld,
