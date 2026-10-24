@@ -1,0 +1,422 @@
+#!/bin/sh
+# edgelog-ship: send a web server's access log to Edgelog.
+#
+# One POSIX shell script. It needs nothing a fresh Debian or Ubuntu does not
+# already have: sh, coreutils, gzip, and curl or GNU wget.
+#
+#     edgelog-ship --url https://edgelog.example.com/ingest/<site uuid> \
+#                  --token-file /etc/edgelog-ship/token \
+#                  --log /var/log/nginx/access.log \
+#                  [--state /var/lib/edgelog-ship/state] \
+#                  [--batch-lines 2000] [--interval 10] [--from-end] [--once]
+#
+# How it keeps every line, once:
+#
+#   * Only whole lines are sent; a last line still being written waits for
+#     its end. A line longer than 64 KiB is cut to 64 KiB.
+#   * Every --interval seconds, the new lines (at most --batch-lines and
+#     4 MiB a batch) are sent gzip'd. A full batch is followed by the next
+#     one at once.
+#   * Every batch is numbered, X-Edgelog-Batch: <shipper id>:<seq>. Before a
+#     batch is sent, its number and where it ends are saved; after a restart
+#     the very same bytes are sent again with the same number, so the server
+#     keeps a batch whose answer was lost once.
+#   * The place in the log (device:inode, offset) is saved only after the
+#     server answered 2xx (a temp file, then a rename).
+#   * Rotation: when the log's path names a new file, the old one is read to
+#     its end as <log>.1 (a last unfinished line included), then the new one
+#     from its start. Truncation in place (copytruncate) starts again at 0.
+#   * Failures never drop a line. 413 halves the batch. 429, 503 and 507 wait
+#     for Retry-After (at most 10 minutes). Anything else (no network, 5xx,
+#     401, 403, 404) waits 1 s doubling up to 5 minutes, with jitter, and
+#     tries again, for ever. Each failure is one line on stderr with the
+#     server's reason, never the token.
+#   * --once sends what is there and exits; it gives up (exit 1, place kept)
+#     after 5 failed tries of a batch or 60 s of waiting in all.
+#   * SIGTERM / SIGINT: the batch in flight gets its answer, then it exits 0.
+#
+# The token is never put on a command line (other users could read it in
+# the process list): curl and wget read it from a file only this user reads.
+# The URL must be https://; plain http:// only to localhost, 127.0.0.1 or ::1.
+
+set -u
+
+VERSION=1.0.0
+MAX_BATCH_BYTES=4194304
+MAX_LINE=65536
+MAX_RETRY_AFTER=600
+BACKOFF_CAP=300
+ONCE_TRIES=5
+ONCE_SECONDS=60
+
+URL=
+TOKEN_FILE=
+LOG=
+STATE=/var/lib/edgelog-ship/state
+BATCH_LINES=2000
+INTERVAL=10
+FROM_END=0
+ONCE=0
+
+say() {
+    printf 'edgelog-ship: %s\n' "$*" >&2
+}
+
+die() {
+    say "$*"
+    exit 2
+}
+
+usage() {
+    sed -n '2,12s/^# \{0,1\}//p' "$0"
+    exit "${1:-0}"
+}
+
+need_value() {
+    [ "$2" -ge 2 ] || die "$1 needs a value"
+}
+
+while [ $# -gt 0 ]; do
+    case $1 in
+        --url) need_value "$1" $#; URL=$2; shift 2 ;;
+        --token-file) need_value "$1" $#; TOKEN_FILE=$2; shift 2 ;;
+        --log) need_value "$1" $#; LOG=$2; shift 2 ;;
+        --state) need_value "$1" $#; STATE=$2; shift 2 ;;
+        --batch-lines) need_value "$1" $#; BATCH_LINES=$2; shift 2 ;;
+        --interval) need_value "$1" $#; INTERVAL=$2; shift 2 ;;
+        --from-end) FROM_END=1; shift ;;
+        --once) ONCE=1; shift ;;
+        --version) echo "edgelog-ship $VERSION"; exit 0 ;;
+        -h|--help) usage 0 ;;
+        *) say "unknown option: $1"; usage 2 ;;
+    esac
+done
+
+[ -n "$URL" ] && [ -n "$TOKEN_FILE" ] && [ -n "$LOG" ] || usage 2
+
+case $BATCH_LINES in ''|*[!0-9]*|0) die "--batch-lines must be a whole number above 0" ;; esac
+case $INTERVAL in ''|*[!0-9]*) die "--interval must be a whole number of seconds" ;; esac
+
+case $URL in
+    https://?*) ;;
+    http://localhost|http://localhost[:/]*|http://127.0.0.1|http://127.0.0.1[:/]*|http://\[::1\]*) ;;
+    *) die "the URL must start with https:// (http:// only to localhost)" ;;
+esac
+
+if command -v curl >/dev/null 2>&1; then
+    CLIENT=curl
+elif command -v wget >/dev/null 2>&1 && wget --version 2>/dev/null | grep -q 'GNU Wget'; then
+    CLIENT=wget
+else
+    die "curl or GNU wget is needed to send the lines"
+fi
+command -v gzip >/dev/null 2>&1 || die "gzip is needed"
+
+[ -r "$TOKEN_FILE" ] || die "the token file $TOKEN_FILE cannot be read"
+TOKEN=$(tr -d ' \t\r\n' < "$TOKEN_FILE")
+[ -n "$TOKEN" ] || die "the token file $TOKEN_FILE is empty"
+
+umask 077
+mkdir -p "$(dirname "$STATE")" || die "the state folder cannot be made"
+WORK=$(mktemp -d "$(dirname "$STATE")/.edgelog-ship.XXXXXX") || die "no temporary folder"
+trap 'rm -rf "$WORK"' EXIT
+STOPPING=0
+trap 'STOPPING=1' TERM INT
+
+printf 'Authorization: Bearer %s\n' "$TOKEN" > "$WORK/auth"
+printf 'header = Authorization: Bearer %s\n' "$TOKEN" > "$WORK/wgetrc"
+unset TOKEN
+
+# ---------------------------------------------------------------- state
+
+state_get() {
+    sed -n "s/^$1=//p" "$STATE" 2>/dev/null | head -n 1
+}
+
+number_or() {
+    case $1 in ''|*[!0-9]*) printf '%s' "$2" ;; *) printf '%s' "$1" ;; esac
+}
+
+random_hex() {
+    od -An -N"$1" -tx1 /dev/urandom | tr -d ' \n'
+}
+
+random_number() {
+    od -An -N2 -tu2 /dev/urandom | tr -d ' \n'
+}
+
+clear_inflight() {
+    INFLIGHT_SEQ=
+    INFLIGHT_FILE=
+    INFLIGHT_START=
+    INFLIGHT_END=
+}
+
+load_state() {
+    SHIPPER=$(state_get shipper)
+    case $SHIPPER in ''|*[!A-Za-z0-9_-]*) SHIPPER=$(random_hex 8) ;; esac
+    SEQ=$(number_or "$(state_get seq)" 0)
+    FILE_ID=$(state_get file)
+    OFFSET=$(number_or "$(state_get offset)" 0)
+    INFLIGHT_SEQ=$(number_or "$(state_get inflight_seq)" '')
+    INFLIGHT_FILE=$(state_get inflight_file)
+    INFLIGHT_START=$(number_or "$(state_get inflight_start)" '')
+    INFLIGHT_END=$(number_or "$(state_get inflight_end)" '')
+}
+
+save_state() {
+    printf 'shipper=%s\nseq=%s\nfile=%s\noffset=%s\ninflight_seq=%s\ninflight_file=%s\ninflight_start=%s\ninflight_end=%s\n' \
+        "$SHIPPER" "$SEQ" "$FILE_ID" "$OFFSET" "$INFLIGHT_SEQ" "$INFLIGHT_FILE" "$INFLIGHT_START" "$INFLIGHT_END" \
+        > "$STATE.tmp" && mv -f "$STATE.tmp" "$STATE"
+}
+
+# ---------------------------------------------------------------- files
+
+file_id() {
+    stat -c '%d:%i' "$1" 2>/dev/null
+}
+
+file_size() {
+    stat -c '%s' "$1" 2>/dev/null || echo 0
+}
+
+nap() {
+    slept=0
+    while [ "$slept" -lt "$1" ] && [ "$STOPPING" -eq 0 ]; do
+        sleep 1
+        slept=$((slept + 1))
+    done
+}
+
+# Point READING at the file being read: the log itself, or, once it was
+# rotated, <log>.1 (FINAL=1: read to its very end, then move on).
+locate() {
+    if [ -n "$FILE_ID" ] && [ "$(file_id "$LOG")" = "$FILE_ID" ]; then
+        READING=$LOG
+        FINAL=0
+    elif [ -n "$FILE_ID" ] && [ "$(file_id "$LOG.1")" = "$FILE_ID" ]; then
+        READING=$LOG.1
+        FINAL=1
+    else
+        return 1
+    fi
+}
+
+start_log_from() {
+    READING=$LOG
+    FINAL=0
+    FILE_ID=$(file_id "$LOG")
+    OFFSET=$1
+    clear_inflight
+    save_state
+}
+
+# Put the next batch in $WORK/batch: BATCH_LINES_READ lines, ending at BATCH_END.
+read_batch() {
+    if [ -n "$INFLIGHT_SEQ" ] && [ "$INFLIGHT_FILE" = "$FILE_ID" ] && [ "$INFLIGHT_START" = "$OFFSET" ] && [ -n "$INFLIGHT_END" ]; then
+        tail -c +"$((OFFSET + 1))" "$READING" | head -c "$((INFLIGHT_END - OFFSET))" > "$WORK/raw"
+    else
+        tail -c +"$((OFFSET + 1))" "$READING" | head -c "$MAX_BATCH_BYTES" | head -n "$CAP" > "$WORK/raw"
+
+        if [ -s "$WORK/raw" ] && [ "$(tail -c 1 "$WORK/raw" | od -An -tx1 | tr -d ' \n')" != 0a ]; then
+            raw_size=$(file_size "$WORK/raw")
+            reaches_end=$([ "$((OFFSET + raw_size))" -ge "$(file_size "$READING")" ] && echo 1 || echo 0)
+
+            # Keep the unfinished last line only at the very end of a rotated
+            # file, or when one line alone fills a batch; otherwise it waits.
+            if { [ "$FINAL" -eq 0 ] || [ "$reaches_end" -eq 0 ]; } && [ "$(wc -l < "$WORK/raw")" -gt 0 ]; then
+                sed '$d' "$WORK/raw" > "$WORK/raw.whole" && mv -f "$WORK/raw.whole" "$WORK/raw"
+            elif [ "$FINAL" -eq 0 ] && [ "$raw_size" -lt "$MAX_BATCH_BYTES" ]; then
+                : > "$WORK/raw"
+            fi
+        fi
+    fi
+
+    BATCH_END=$((OFFSET + $(file_size "$WORK/raw")))
+    cut -b "1-$MAX_LINE" < "$WORK/raw" > "$WORK/batch"
+    BATCH_LINES_READ=$(wc -l < "$WORK/batch" | tr -d ' ')
+    [ -s "$WORK/raw" ] || BATCH_LINES_READ=0
+}
+
+# ---------------------------------------------------------------- sending
+
+http_post() {
+    : > "$WORK/answer"
+    : > "$WORK/headers"
+
+    if [ "$CLIENT" = curl ]; then
+        STATUS=$(curl -sS --max-time 60 -o "$WORK/answer" -D "$WORK/headers" -w '%{http_code}' \
+            -H @"$WORK/auth" \
+            -H 'Content-Type: text/plain; charset=utf-8' \
+            -H 'Content-Encoding: gzip' \
+            -H "X-Edgelog-Batch: $SHIPPER:$1" \
+            -A "edgelog-ship/$VERSION" \
+            --data-binary @"$WORK/batch.gz" "$URL" 2>"$WORK/error")
+    else
+        WGETRC="$WORK/wgetrc" wget -q -S -O "$WORK/answer" --content-on-error --max-redirect=0 \
+            --timeout=60 --tries=1 \
+            --header='Content-Type: text/plain; charset=utf-8' \
+            --header='Content-Encoding: gzip' \
+            --header="X-Edgelog-Batch: $SHIPPER:$1" \
+            -U "edgelog-ship/$VERSION" \
+            --post-file="$WORK/batch.gz" "$URL" 2>"$WORK/headers"
+        STATUS=$(sed -n 's/^ *HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p' "$WORK/headers" | tail -n 1)
+    fi
+
+    case $STATUS in [1-5][0-9][0-9]) ;; *) STATUS=000 ;; esac
+}
+
+answer_field() {
+    sed -n "s/.*\"$1\":\"\{0,1\}\([^\",}]*\).*/\1/p" "$WORK/answer" | head -n 1 | cut -c 1-300
+}
+
+retry_after() {
+    wait_for=$(sed -n 's/^ *[Rr]etry-[Aa]fter: *\([0-9][0-9]*\).*/\1/p' "$WORK/headers" | tail -n 1)
+    [ -n "$wait_for" ] || return 1
+    [ "$wait_for" -le "$MAX_RETRY_AFTER" ] || wait_for=$MAX_RETRY_AFTER
+    [ "$wait_for" -ge 1 ] || wait_for=1
+    printf '%s' "$wait_for"
+}
+
+backoff() {
+    ceiling=1
+    step=0
+    while [ "$step" -lt "$1" ] && [ "$ceiling" -lt "$BACKOFF_CAP" ]; do
+        ceiling=$((ceiling * 2))
+        step=$((step + 1))
+    done
+    [ "$ceiling" -le "$BACKOFF_CAP" ] || ceiling=$BACKOFF_CAP
+    jitter=$(( $(random_number) % (ceiling + 1) ))
+    [ "$jitter" -ge 1 ] || jitter=1
+    printf '%s' "$jitter"
+}
+
+# Send $WORK/batch until the server keeps it. Returns 1 when --once gives up
+# or the shipper is stopping.
+send_batch() {
+    if [ -n "$INFLIGHT_SEQ" ] && [ "$INFLIGHT_FILE" = "$FILE_ID" ] && [ "$INFLIGHT_START" = "$OFFSET" ]; then
+        seq=$INFLIGHT_SEQ
+    else
+        seq=$((SEQ + 1))
+    fi
+    INFLIGHT_SEQ=$seq
+    INFLIGHT_FILE=$FILE_ID
+    INFLIGHT_START=$OFFSET
+    INFLIGHT_END=$BATCH_END
+    save_state
+
+    gzip -c < "$WORK/batch" > "$WORK/batch.gz"
+    attempt=0
+    waited=0
+
+    while :; do
+        http_post "$seq"
+
+        case $STATUS in
+            2[0-9][0-9])
+                SEQ=$seq
+                OFFSET=$BATCH_END
+                CAP=$BATCH_LINES
+                clear_inflight
+                save_state
+                SENT_LINES=$((SENT_LINES + BATCH_LINES_READ))
+                SENT_BATCHES=$((SENT_BATCHES + 1))
+                rejected=$(answer_field rejected)
+                case $rejected in ''|0|*[!0-9]*) ;; *) say "batch $seq: $rejected rejected (not in the site's log format)" ;; esac
+                return 0
+                ;;
+            413)
+                if [ "$BATCH_LINES_READ" -gt 1 ]; then
+                    CAP=$((BATCH_LINES_READ / 2))
+                    clear_inflight
+                    save_state
+                    say "the server found the batch too large; sending $CAP lines at a time"
+                    return 0
+                fi
+                ;;
+        esac
+
+        attempt=$((attempt + 1))
+        wait_for=
+        case $STATUS in 429|503|507) wait_for=$(retry_after) || wait_for= ;; esac
+        [ -n "$wait_for" ] || wait_for=$(backoff "$attempt")
+
+        reason=$(answer_field error)
+        [ -n "$reason" ] || reason=$(head -c 200 "$WORK/error" 2>/dev/null | tr '\n' ' ')
+        [ "$STATUS" != 000 ] || STATUS=unreachable
+        say "batch $seq not kept ($STATUS: ${reason:-no answer}); trying again in $wait_for s"
+
+        if [ "$ONCE" -eq 1 ] && { [ "$attempt" -ge "$ONCE_TRIES" ] || [ "$((waited + wait_for))" -gt "$ONCE_SECONDS" ]; }; then
+            say "giving up for now; the same lines are sent at the next run"
+            return 1
+        fi
+
+        nap "$wait_for"
+        waited=$((waited + wait_for))
+        [ "$STOPPING" -eq 0 ] || return 1
+    done
+}
+
+# ---------------------------------------------------------------- main
+
+load_state
+CAP=$BATCH_LINES
+SENT_LINES=0
+SENT_BATCHES=0
+
+if [ -n "$FILE_ID" ] && locate; then
+    [ "$FINAL" -eq 0 ] || say "finishing $READING, rotated while stopped"
+else
+    if [ -n "$FILE_ID" ]; then
+        say "the file read last is gone or compressed; starting the current log from its start"
+    fi
+    while [ ! -e "$LOG" ] && [ "$STOPPING" -eq 0 ]; do
+        say "waiting for $LOG"
+        nap 5
+    done
+    [ "$STOPPING" -eq 0 ] || exit 0
+    first_offset=0
+    [ -n "$FILE_ID" ] || [ "$FROM_END" -eq 0 ] || first_offset=$(file_size "$LOG")
+    start_log_from "$first_offset"
+fi
+
+while [ "$STOPPING" -eq 0 ]; do
+    if ! locate; then
+        if [ -e "$LOG" ]; then
+            say "the file being read is gone; starting the current log from its start"
+            start_log_from 0
+        else
+            [ "$ONCE" -eq 0 ] || break
+            nap 1
+            continue
+        fi
+    fi
+
+    if [ "$(file_size "$READING")" -lt "$OFFSET" ]; then
+        say "the log was truncated in place; starting it again from its start"
+        OFFSET=0
+        clear_inflight
+        save_state
+    fi
+
+    read_batch
+
+    if [ "$BATCH_LINES_READ" -eq 0 ]; then
+        if [ "$FINAL" -eq 1 ]; then
+            start_log_from 0
+            continue
+        fi
+        [ "$ONCE" -eq 0 ] || break
+        nap "$INTERVAL"
+        continue
+    fi
+
+    send_batch || exit "$([ "$STOPPING" -eq 1 ] && echo 0 || echo 1)"
+
+    if [ "$ONCE" -eq 0 ] && [ "$BATCH_LINES_READ" -lt "$CAP" ]; then
+        nap "$INTERVAL"
+    fi
+done
+
+[ "$ONCE" -eq 0 ] || say "sent $SENT_LINES lines in $SENT_BATCHES batches"
+exit 0

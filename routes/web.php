@@ -3,6 +3,7 @@
 use App\Http\Controllers\AcceptTeamInvitationController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\ShipperDownloadController;
 use App\Http\Controllers\SiteController;
 use App\Http\Controllers\SiteTeamController;
 use App\Http\Controllers\SiteTokenController;
@@ -15,6 +16,8 @@ use Illuminate\Support\Facades\Route;
 Route::get('/', function () {
     return view('welcome');
 });
+
+Route::get('/downloads/edgelog-ship', ShipperDownloadController::class)->name('shipper.download');
 
 Route::get('/invitations/{token}', [AcceptTeamInvitationController::class, 'show'])->name('invitations.show');
 

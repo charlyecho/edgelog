@@ -8,6 +8,7 @@
             @csrf
             <x-input :label="__('URL')" name="url" placeholder="https://example.com" required autofocus :hint="__('Only the address of the site is kept: https://example.com/blog becomes https://example.com.')" />
             <x-input :label="__('Name (optional)')" name="name" :hint="__('By default, the host name of the URL.')" />
+            <x-timezone-select :value="config('app.timezone')" />
             <div class="flex items-center gap-2">
                 <x-button>{{ __('Add the site') }}</x-button>
                 <x-button variant="secondary" :href="route('teams.show', $team)">{{ __('Cancel') }}</x-button>

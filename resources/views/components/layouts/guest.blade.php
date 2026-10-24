@@ -7,12 +7,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
     <title>{{ $title }} · {{ config('app.name') }}</title>
+    <x-favicons />
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 <body class="grid min-h-screen place-items-center bg-page px-4 py-6 font-sans text-ink antialiased">
     <main class="w-full max-w-[400px] rounded-[14px] border border-rule bg-surface px-6 pt-6 pb-5 shadow-card">
         <a href="{{ url('/') }}" class="mb-4 flex items-center gap-2.5 text-base font-bold tracking-tight no-underline">
-            <x-logo />
+            <x-logo class="size-9" />
             <span>{{ config('app.name') }}</span>
         </a>
 

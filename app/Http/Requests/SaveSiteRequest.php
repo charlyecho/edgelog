@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Enums\LogFormat;
 use App\Models\Site;
 use App\Models\Team;
 use Illuminate\Contracts\Validation\ValidationRule;
@@ -41,6 +42,8 @@ class SaveSiteRequest extends FormRequest
     {
         return [
             'name' => ['nullable', 'string', 'max:255'],
+            'log_format' => ['sometimes', Rule::enum(LogFormat::class)],
+            'timezone' => ['sometimes', 'timezone:all'],
             'url' => [
                 'required',
                 'string',
@@ -66,7 +69,7 @@ class SaveSiteRequest extends FormRequest
     /**
      * Get the site's attributes, naming it after its host when no name is given.
      *
-     * @return array{name: string, url: string}
+     * @return array{name: string, url: string, log_format?: string, timezone?: string}
      */
     public function siteAttributes(): array
     {
@@ -75,6 +78,7 @@ class SaveSiteRequest extends FormRequest
         return [
             'name' => $this->validated('name') ?: parse_url($url, PHP_URL_HOST),
             'url' => $url,
+            ...$this->safe()->only(['log_format', 'timezone']),
         ];
     }
 

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\LogFormat;
 use Database\Factories\SiteFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -10,9 +11,11 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Str;
 
-#[Fillable(['name', 'url'])]
+#[Fillable(['name', 'url', 'log_format', 'timezone'])]
 #[Hidden(['token_hash'])]
 #[RouteKey('uuid')]
 class Site extends Model
@@ -24,6 +27,16 @@ class Site extends Model
      * The prefix every site token starts with.
      */
     public const string TOKEN_PREFIX = 'edg_';
+
+    /**
+     * The model's default values for attributes.
+     *
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'log_format' => 'auto',
+        'timezone' => 'UTC',
+    ];
 
     /**
      * Get the columns that should receive a unique identifier.
@@ -44,6 +57,7 @@ class Site extends Model
     {
         return [
             'token_generated_at' => 'datetime',
+            'log_format' => LogFormat::class,
         ];
     }
 
@@ -55,6 +69,26 @@ class Site extends Model
     public function team(): BelongsTo
     {
         return $this->belongsTo(Team::class);
+    }
+
+    /**
+     * Get the days of figures collected for the site.
+     *
+     * @return HasMany<SiteDay, $this>
+     */
+    public function days(): HasMany
+    {
+        return $this->hasMany(SiteDay::class);
+    }
+
+    /**
+     * Get what the ingest endpoint last answered for the site.
+     *
+     * @return HasOne<IngestStatus, $this>
+     */
+    public function ingestStatus(): HasOne
+    {
+        return $this->hasOne(IngestStatus::class);
     }
 
     /**

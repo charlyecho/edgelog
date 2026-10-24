@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Analytics\SitePeriod;
 use App\Http\Requests\SaveSiteRequest;
+use App\Ingest\ShipperSetup;
 use App\Models\Site;
 use App\Models\Team;
 use Illuminate\Http\RedirectResponse;
@@ -40,11 +42,17 @@ class SiteController extends Controller
     /**
      * Show the site's dashboard.
      */
-    public function show(Team $team, Site $site): View
+    public function show(Request $request, Team $team, Site $site): View
     {
         Gate::authorize('view', $site);
 
-        return view('sites.show', ['team' => $team, 'site' => $site]);
+        $length = in_array($request->integer('days'), SitePeriod::LENGTHS, true) ? $request->integer('days') : 30;
+
+        return view('sites.show', [
+            'team' => $team,
+            'site' => $site,
+            'period' => SitePeriod::lastDays($site, $length),
+        ]);
     }
 
     /**
@@ -60,8 +68,9 @@ class SiteController extends Controller
 
         return view('sites.edit', [
             'team' => $team,
-            'site' => $site,
+            'site' => $site->load('ingestStatus'),
             'otherTeams' => $otherTeams,
+            'setup' => new ShipperSetup($site),
         ]);
     }
 

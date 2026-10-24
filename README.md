@@ -1,58 +1,212 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
-
 <p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
+  <img src="public/logo.svg" alt="Edgelog: a hedgehog with glasses reading GET 200" width="120" height="120">
 </p>
 
-## About Laravel
+<h1 align="center">Edgelog</h1>
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+<p align="center">
+  <strong>Web analytics read from your server's own access log.</strong><br>
+  The people, the AI assistants and the crawlers that a JavaScript tracker never sees.<br>
+  No cookie, no script in the visitor's browser.
+</p>
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+---
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+## What it is
 
-## Learning Laravel
+Edgelog counts a website's visits from the access log of its web server (nginx or Apache).
+More and more requests never run JavaScript (AI assistants fetching a page to answer someone,
+crawlers training a model, bots and scanners), so a script-based tool never counts them. The
+access log sees every request.
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+Edgelog is a rewrite in Laravel and SQLite of [Skald](https://github.com/spcaeo/skald), and
+follows its features, its behaviour and its look.
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+### What works today
 
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
+- **Accounts and teams.** Sign up, sign in, forgotten passwords, two-step sign-in (TOTP with
+  recovery codes). A sign-up creates a team its author owns; others join by invitation (a link
+  mailed, valid 7 days, used once, only its hash stored).
+- **Roles** per team: `viewer` reads everything; `admin` also invites, removes and changes
+  members (not owners) and manages sites; `owner` also manages owners and deletes the team. A
+  team always keeps one owner.
+- **Sites.** Each site belongs to exactly one team and can be moved to another team its admin
+  manages. Every site has a UUID (its URLs are `/teams/{team uuid}/sites/{site uuid}`) and a
+  token, shown once and stored as a hash only.
+- **Log ingestion.** `edgelog-ship`, one shell script to install on the site's server, tails the
+  access log and posts its new lines to `POST /ingest/{site uuid}` with the site token. Every
+  line is kept once, and none is lost (see [Sending a site's log](#sending-a-sites-log)).
+- **The daily run.** Each site's day, cut at midnight in the site's time zone, is counted from its
+  log, checked, then counted a second time by an independent audit. Only a day both counts agree
+  on is shown; one that does not add up is withheld, never guessed (see
+  [The daily run](#the-daily-run)).
+- **Overview** of a site: visitors, pages read, visitors from AI assistants, the five groups that
+  add up to the log, and the breakdowns (pages, sources, referrers, AI assistants, search
+  engines, bots, countries, devices, browsers, campaigns), over 7, 30 or 90 days.
+- **Translatable interface**: every text goes through `__()` with English keys. English only
+  for now.
 
-## Agentic Development
+## Requirements
 
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+- PHP 8.3 or newer, with the `sqlite3`, `zlib` and `mbstring` extensions
+- Composer 2
+- Node.js 20 or newer (to build the front end with Vite)
+- On each site's server, nothing to install: the shipper is a POSIX shell script that uses
+  `gzip` and `curl` or GNU `wget`, all on a fresh Debian or Ubuntu
 
-```bash
-composer require laravel/boost --dev
+## Installation
 
-php artisan boost:install
+```sh
+git clone <this repository> edgelog
+cd edgelog
+composer setup
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+`composer setup` installs the PHP and JavaScript packages, creates `.env` from `.env.example`,
+generates the application key, creates the SQLite database (`database/database.sqlite`), runs
+the migrations and builds the front end.
 
-## Contributing
+Then set the address the application is served from in `.env` (it is used in the links of
+the mails and in the shipper's commands):
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+```dotenv
+APP_URL=https://edgelog.example.com
+```
 
-## Code of Conduct
+For a local test account (`test@example.com`, password `password`) with a team and two sites:
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+```sh
+php artisan db:seed
+```
 
-## Security Vulnerabilities
+### Running it
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+In development, `composer dev` starts the development processes (the PHP server and Vite among
+them) together. Or serve `public/` with any PHP web server (nginx and PHP-FPM, Laravel Herd, Valet)
+and run `npm run dev` for the front end.
 
-## License
+In production:
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+```sh
+composer install --no-dev --optimize-autoloader
+npm ci && npm run build
+php artisan migrate --force
+php artisan optimize
+```
+
+The daily run needs the scheduler and a queue worker. With cron:
+
+```cron
+* * * * * cd /path/to/edgelog && php artisan schedule:run >> /dev/null 2>&1
+```
+
+and a worker kept running (systemd, Supervisor):
+
+```sh
+php artisan queue:work --timeout=1800
+```
+
+In development, `php artisan schedule:work` and `php artisan queue:work` do the same in a
+terminal.
+
+### Mail
+
+Invitations and password resets are sent by mail. Set the `MAIL_*` variables in `.env` (SMTP,
+or any mailer Laravel supports). With the default `MAIL_MAILER=log`, mails are written to
+`storage/logs/laravel.log`, and the team page shows each invitation link once so it can be passed
+on by hand.
+
+## Sending a site's log
+
+1. Add the site in its team (**Add a site**). Its token is shown once: copy it.
+2. Open the site's **Site settings**. **Send the log** gives the commands for the site's server
+   (Debian or Ubuntu), filled in with its own address: install `edgelog-ship`, store the token
+   in a file only the shipper reads, run it as a systemd service.
+3. **Connection** on the same page says what arrived: the last batch, today's lines, and the
+   last refusal in plain words.
+
+The formats read are nginx's default `combined`, Apache's `combined`, and an extended nginx
+format with the host, the time taken, the country and a request id (the settings page shows its
+`log_format`). **Detect it** takes any of them. Lines in another format are counted as refused
+and dropped; their content is never kept.
+
+### How no line is lost or counted twice
+
+- The shipper saves its place in the log only after the server answered. Until then it sends
+  the batch again, waiting longer each time, and follows the server's `Retry-After`.
+- Every batch is numbered (`X-Edgelog-Batch: <shipper id>:<seq>`); a batch the server kept
+  before is answered as a duplicate and not written again.
+- The server journals each append: a crash halfway is repaired at the next batch.
+- Log rotation is followed on both sides. The server keeps one file per site and per UTC day
+  under `storage/app/private/ingest/<site uuid>/` (`access.log`, `access.log.1`,
+  `access.log.2.gz`, ...).
+
+### Limits
+
+Set in `.env` (see `config/ingest.php`):
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `INGEST_ROOT` | `storage/app/private/ingest` | where shipped logs are kept |
+| `INGEST_PER_MINUTE` | 120 | batches a minute per site |
+| `INGEST_KEEP` | 14 | days of rotated files kept per site |
+| `INGEST_MAX_MB` | 1024 | the most one site's file may hold in a day |
+| `INGEST_TEAM_DAILY_MB` | 200 | the most a team's sites may ship a UTC day, together |
+| `INGEST_MIN_FREE_GB` | 5 | below this much free disk, every batch waits |
+
+A batch is at most 5 MiB, packed and unpacked, and a line at most 64 KiB.
+
+## The daily run
+
+Every hour, `edgelog:run-daily` looks for sites whose yesterday is over where the site is, plus
+`ANALYTICS_SETTLE_MINUTES` (30) for the shippers' last lines, and not counted yet. For each one it
+queues two jobs, chained:
+
+1. **CollectSiteDay** reads the day's lines (every file of the site that may hold them, in time
+   order) twice. The first pass learns what only a whole visit tells; the second files every
+   request in exactly one of five groups (people, AI assistants, search engines, bots and
+   scanners, your own traffic) and adds the day up: requests, page views, visits and readers per
+   group, and the breakdowns. Then it checks the arithmetic: the groups add up to the requests,
+   every breakdown to the figure it breaks down, at most 1% of the lines unreadable. A day that
+   fails is **withheld**.
+2. **AuditSiteDay** counts the day again by another road: its own line reader, its own rule
+   order, its own page and visit rules, sharing only the lists of names (`app/Analytics/Patterns.php`).
+   When both agree the day is **verified**; when they differ it is **withheld**, with the figures
+   that differ.
+
+The rules follow Skald's
+[CLASSIFICATION.md](https://github.com/spcaeo/skald/blob/main/CLASSIFICATION.md): named AI
+assistants (training or answering a live question) and search crawlers by their user agent; link
+previews, libraries and self-declared bots as bots; one request for a secret or config file
+marks the whole visitor as a scanner; a browser-like visit that fetches `robots.txt` or a
+sitemap, that never loads a script, style or framework payload near its pages, or that reads
+6 pages in 2 seconds, is a bot. A person who followed an AI assistant's link (by the referrer or
+a `utm_source` tag) is a visitor from AI. A page view is a 2xx or 304 answer to a GET or HEAD for
+a page, never a file, a redirect or a framework's data fetch. A visit is one address and user
+agent with no gap over 30 minutes; a page from a new outside source starts a new one.
+
+A day before the site's first line is not recorded, never zero; a day the logs begin in is
+marked as partial.
+
+To count days again (after a change of rules, or a withheld day once its cause is found):
+
+```sh
+php artisan edgelog:collect <site uuid> --day=2026-10-21 --days=7 [--sync]
+```
+
+Not done yet, compared with Skald: checking a crawler's claim against its owner's published
+addresses, your own traffic (lists of addresses and agents), countries from a GeoIP file,
+returning visitors, the "likely sent by an AI assistant" estimate, the daily mail and the
+live view.
+
+## Tests
+
+```sh
+php artisan test
+```
+
+## Credits
+
+Edgelog follows [Skald](https://github.com/spcaeo/skald) by spcaeo, licensed under the Elastic
+License 2.0. The code here is written anew for Laravel; Skald's documentation is the reference
+for how things should behave.

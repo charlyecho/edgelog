@@ -19,6 +19,14 @@
     --warn: #9a6400;
     --bad: #c0352f;
     --shadow: 0 1px 0 rgba(23, 33, 43, 0.04), 0 8px 24px -12px rgba(23, 33, 43, 0.18);
+    /* Colour is for data: the five groups, and the two daily series. */
+    --group-people: #2a78d6;
+    --group-answer_engines: #eb6834;
+    --group-search_engines: #1baf7a;
+    --group-bots: #eda100;
+    --group-ours: #e87ba4;
+    --series-visitors: #2a78d6;
+    --series-pages: #008300;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -37,6 +45,13 @@
         --warn: #d9a440;
         --bad: #ef6b63;
         --shadow: 0 1px 0 rgba(0, 0, 0, 0.3), 0 10px 30px -14px rgba(0, 0, 0, 0.7);
+        --group-people: #3987e5;
+        --group-answer_engines: #d95926;
+        --group-search_engines: #199e70;
+        --group-bots: #c98500;
+        --group-ours: #d55181;
+        --series-visitors: #3987e5;
+        --series-pages: #2fa52f;
     }
 }
 
