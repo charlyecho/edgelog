@@ -68,3 +68,51 @@ function dailyChart(figure) {
 }
 
 document.querySelectorAll('[data-daily-chart]').forEach(dailyChart);
+
+/**
+ * "See all" on a top list: show the rows past the first few, or hide them again.
+ */
+document.querySelectorAll('[data-top-list]').forEach((list) => {
+    const button = list.querySelector('[data-see-all]');
+
+    if (!button) {
+        return;
+    }
+
+    const more = button.textContent;
+
+    button.addEventListener('click', () => {
+        const hidden = list.querySelector('[data-extra].hidden') !== null;
+        list.querySelectorAll('[data-extra]').forEach((row) => row.classList.toggle('hidden', !hidden));
+        button.textContent = hidden ? button.dataset.less : more;
+    });
+});
+
+/**
+ * The Real time tab reloads itself every few minutes, unless the reader paused it.
+ */
+document.querySelectorAll('[data-live-refresh]').forEach((bar) => {
+    const button = bar.querySelector('[data-live-pause]');
+    const state = bar.querySelector('[data-live-state]');
+    const read = () => { try { return localStorage.getItem('live-paused') === '1'; } catch { return false; } };
+    const write = (paused) => { try { localStorage.setItem('live-paused', paused ? '1' : '0'); } catch { /* private window */ } };
+    let timer = null;
+
+    const apply = (paused) => {
+        clearTimeout(timer);
+        button.textContent = paused ? button.dataset.resume : button.dataset.pause;
+        state.textContent = paused ? button.dataset.paused : button.dataset.running;
+
+        if (!paused) {
+            timer = setTimeout(() => window.location.reload(), Number(bar.dataset.liveRefresh) * 1000);
+        }
+    };
+
+    button.addEventListener('click', () => {
+        const paused = !read();
+        write(paused);
+        apply(paused);
+    });
+
+    apply(read());
+});

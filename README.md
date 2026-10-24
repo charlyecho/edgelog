@@ -40,9 +40,10 @@ follows its features, its behaviour and its look.
   log, checked, then counted a second time by an independent audit. Only a day both counts agree
   on is shown; one that does not add up is withheld, never guessed (see
   [The daily run](#the-daily-run)).
-- **Overview** of a site: visitors, pages read, visitors from AI assistants, the five groups that
-  add up to the log, and the breakdowns (pages, sources, referrers, AI assistants, search
-  engines, bots, countries, devices, browsers, campaigns), over 7, 30 or 90 days.
+- **Overview** of a site. *Summary*: visitors, pages read, visitors from AI, AI assistants,
+  search engines and bots, each with its change and its days, a daily chart, the top countries,
+  pages, sources and AI assistants, who else came, and each day in numbers, for yesterday, 7, 30,
+  90 days or all time. *Real time*: today so far, refreshed every two minutes.
 - **Translatable interface**: every text goes through `__()` with English keys. English only
   for now.
 
@@ -188,6 +189,15 @@ agent with no gap over 30 minutes; a page from a new outside source starts a new
 A day before the site's first line is not recorded, never zero; a day the logs begin in is
 marked as partial.
 
+**Real time.** A `RefreshLiveSnapshot` counts today's log so far with the same rules and keeps it
+in the cache for 3 minutes (never in the history). One is queued as soon as a batch brings new
+lines (at most once a minute per site), and every two minutes by `edgelog:live` for each site that
+sent lines in the last two hours, so "active now" goes down when nothing arrives. Without a worker,
+the page counts the snapshot itself once it is older than 3 minutes. The site's **Real time** tab shows it: visitors active now and in
+the last 30 minutes, visitors today, minute-by-minute charts, pages being read, the newest visits,
+and the AI assistants and crawlers fetching right now. The page reloads itself every two minutes
+unless paused.
+
 To count days again (after a change of rules, or a withheld day once its cause is found):
 
 ```sh
@@ -196,8 +206,8 @@ php artisan edgelog:collect <site uuid> --day=2026-10-21 --days=7 [--sync]
 
 Not done yet, compared with Skald: checking a crawler's claim against its owner's published
 addresses, your own traffic (lists of addresses and agents), countries from a GeoIP file,
-returning visitors, the "likely sent by an AI assistant" estimate, the daily mail and the
-live view.
+returning visitors, the "likely sent by an AI assistant" estimate, the world map, the Insights
+tab and the daily mail.
 
 ## Tests
 

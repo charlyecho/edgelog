@@ -75,7 +75,7 @@
 
                 <nav class="grid gap-0.5">
                     @if ($railSite)
-                        <x-rail-link :href="route('teams.sites.show', [$railTeam, $railSite])" icon="chart" :active="request()->routeIs('teams.sites.show')">{{ __('Overview') }}</x-rail-link>
+                        <x-rail-link :href="route('teams.sites.show', [$railTeam, $railSite])" icon="chart" :active="request()->routeIs('teams.sites.show', 'teams.sites.realtime')">{{ __('Overview') }}</x-rail-link>
                         @can('update', $railSite)
                             <x-rail-link :href="route('teams.sites.edit', [$railTeam, $railSite])" icon="sliders" :active="request()->routeIs('teams.sites.edit')">{{ __('Site settings') }}</x-rail-link>
                         @endcan
@@ -116,6 +116,9 @@
                     @endisset
                     <li class="truncate">{{ $title }}</li>
                 </ol>
+                @isset($toolbar)
+                    <div class="ml-4 flex flex-wrap items-center gap-2">{{ $toolbar }}</div>
+                @endisset
                 @isset($actions)
                     <div class="ml-auto flex items-center gap-2">{{ $actions }}</div>
                 @endisset

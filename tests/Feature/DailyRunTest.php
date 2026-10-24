@@ -279,11 +279,12 @@ class DailyRunTest extends TestCase
         $this->actingAs($viewer)
             ->get(route('teams.sites.show', [$this->site->team, $this->site]).'?days=7')
             ->assertOk()
-            ->assertSee('1 day verified')
-            ->assertSee('6 days not recorded')
+            ->assertSee('1 of 7 days verified')
+            ->assertSee('6 not recorded')
             ->assertSee('/pricing/')
             ->assertSee('GPTBot')
-            ->assertSee('chatgpt.com');
+            ->assertSee('AI assistant')
+            ->assertSee('Each day, in numbers');
     }
 
     public function test_the_overview_never_shows_a_withheld_days_figures(): void
@@ -298,7 +299,7 @@ class DailyRunTest extends TestCase
         $this->actingAs($owner)
             ->get(route('teams.sites.show', [$this->site->team, $this->site]))
             ->assertOk()
-            ->assertSee('1 day withheld')
+            ->assertSee('1 withheld')
             ->assertSee('No figures yet')
             ->assertDontSee('GPTBot');
     }

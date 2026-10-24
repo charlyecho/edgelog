@@ -25,6 +25,7 @@
             @endif
         @endforeach
 
+        <path d="{{ $area('visitors') }}" fill="color-mix(in srgb, var(--series-visitors) 12%, transparent)" />
         <path d="{{ $path('pages') }}" fill="none" stroke="var(--series-pages)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
         <path d="{{ $path('visitors') }}" fill="none" stroke="var(--series-visitors)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
 

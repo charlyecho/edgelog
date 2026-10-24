@@ -6,10 +6,12 @@ use App\Enums\IngestRefusalReason;
 use App\Enums\LogFormat;
 use App\Ingest\IngestLog;
 use App\Ingest\TeamDailyQuota;
+use App\Jobs\RefreshLiveSnapshot;
 use App\Models\Site;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
@@ -220,5 +222,33 @@ class IngestEndpointTest extends TestCase
             ->assertOk()
             ->assertSee(route('ingest.store', $this->site))
             ->assertSee('1 line kept');
+    }
+
+    public function test_new_lines_queue_a_live_refresh_at_most_once_a_minute(): void
+    {
+        Queue::fake();
+
+        $this->ship(self::LINE, ['X-Edgelog-Batch' => 's:1'])->assertOk();
+        $this->ship(self::LINE, ['X-Edgelog-Batch' => 's:2'])->assertOk();
+        Queue::assertPushed(RefreshLiveSnapshot::class, 1);
+
+        // A refresh still waiting in the queue makes another useless (the job is
+        // unique per site until it runs); once it ran, the next lines queue one.
+        $this->travel(RefreshLiveSnapshot::AT_MOST_EVERY + 1)->seconds();
+        $this->ship(self::LINE, ['X-Edgelog-Batch' => 's:3'])->assertOk();
+        Queue::assertPushed(RefreshLiveSnapshot::class, 1);
+
+        $this->travel((new RefreshLiveSnapshot($this->site))->uniqueFor)->seconds();
+        $this->ship(self::LINE, ['X-Edgelog-Batch' => 's:4'])->assertOk();
+        Queue::assertPushed(RefreshLiveSnapshot::class, 2);
+    }
+
+    public function test_a_batch_with_no_line_kept_queues_no_refresh(): void
+    {
+        Queue::fake();
+
+        $this->ship("not a log line\n")->assertOk()->assertJson(['accepted' => 0]);
+
+        Queue::assertNotPushed(RefreshLiveSnapshot::class);
     }
 }

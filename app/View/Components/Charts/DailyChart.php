@@ -83,6 +83,38 @@ class DailyChart extends Component
     }
 
     /**
+     * The area under one series, closed on the baseline, broken like its line.
+     */
+    public function area(string $key): string
+    {
+        $area = '';
+        $run = [];
+        $base = self::HEIGHT - self::BOTTOM;
+
+        foreach ([...$this->series, ['visitors' => null, 'pages' => null]] as $index => $point) {
+            if ($point[$key] !== null) {
+                $run[] = [$this->x($index), $this->y($point[$key])];
+
+                continue;
+            }
+
+            if (count($run) > 1) {
+                $area .= 'M'.$run[0][0].' '.$base.' ';
+
+                foreach ($run as [$x, $y]) {
+                    $area .= "L{$x} {$y} ";
+                }
+
+                $area .= 'L'.$run[array_key_last($run)][0].' '.$base.' Z ';
+            }
+
+            $run = [];
+        }
+
+        return trim($area);
+    }
+
+    /**
      * The days drawn alone, between two days without figures: a dot, or they would not show.
      *
      * @return list<int>

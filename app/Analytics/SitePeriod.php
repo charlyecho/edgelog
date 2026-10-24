@@ -21,9 +21,9 @@ use Illuminate\Support\Collection;
 final class SitePeriod
 {
     /**
-     * The periods a reader can choose, in days.
+     * The periods a reader can choose: a number of whole days ending yesterday, or every day.
      */
-    public const array LENGTHS = [7, 30, 90];
+    public const array CHOICES = ['1', '7', '30', '90', 'all'];
 
     /**
      * Every day of the period, oldest first, with what history holds for it.
@@ -68,6 +68,42 @@ final class SitePeriod
         $last = now($site->timezone)->subDay()->startOfDay()->toImmutable();
 
         return new self($site, $last->subDays($length - 1), $last);
+    }
+
+    /**
+     * Every day since the site's first collected one, ending yesterday.
+     */
+    public static function allTime(Site $site): self
+    {
+        $last = now($site->timezone)->subDay()->startOfDay()->toImmutable();
+        $first = $site->days()->min('day');
+
+        return new self($site, $first === null ? $last : CarbonImmutable::parse($first)->min($last), $last);
+    }
+
+    /**
+     * The period a reader chose ('1', '7', '30', '90' or 'all').
+     */
+    public static function choose(Site $site, string $choice): self
+    {
+        return $choice === 'all' ? self::allTime($site) : self::lastDays($site, (int) $choice);
+    }
+
+    /**
+     * The same number of days, just before this period: what its changes are against.
+     */
+    public function previous(): self
+    {
+        return new self($this->site, $this->first->subDays($this->length()), $this->first->subDay());
+    }
+
+    /**
+     * Determine if this period can be compared with another: both have every
+     * one of their days verified, so neither sum leaves days out.
+     */
+    public function comparableWith(self $other): bool
+    {
+        return $this->verified()->count() === $this->length() && $other->verified()->count() === $other->length();
     }
 
     /**
@@ -155,6 +191,28 @@ final class SitePeriod
         }
 
         return $kept;
+    }
+
+    /**
+     * One figure of each day, oldest first, for a sparkline: null for a day without figures.
+     *
+     * @param  callable(SiteDay): int  $figure
+     * @return list<?int>
+     */
+    public function daily(callable $figure): array
+    {
+        return array_values(array_map(
+            fn (?SiteDay $day) => $day?->status === DayStatus::Verified ? $figure($day) : null,
+            $this->days,
+        ));
+    }
+
+    /**
+     * A group's figure of a stored day.
+     */
+    public static function figureOf(SiteDay $day, TrafficGroup $group, string $figure): int
+    {
+        return (int) ($day->groups->firstWhere('group', $group)?->{$figure} ?? 0);
     }
 
     /**

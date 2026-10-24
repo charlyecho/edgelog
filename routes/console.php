@@ -9,3 +9,4 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('edgelog:run-daily')->hourly()->withoutOverlapping();
+Schedule::command('edgelog:live')->everyTwoMinutes()->withoutOverlapping();

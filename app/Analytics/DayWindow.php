@@ -15,10 +15,21 @@ final readonly class DayWindow
 
     public CarbonImmutable $end;
 
-    public function __construct(public string $day, public string $timezone)
+    /**
+     * @param  ?CarbonImmutable  $until  where the window stops when the day is not over yet
+     */
+    public function __construct(public string $day, public string $timezone, ?CarbonImmutable $until = null)
     {
         $this->start = CarbonImmutable::parse($day, $timezone)->startOfDay()->utc();
-        $this->end = CarbonImmutable::parse($day, $timezone)->addDay()->startOfDay()->utc();
+        $this->end = $until?->utc() ?? CarbonImmutable::parse($day, $timezone)->addDay()->startOfDay()->utc();
+    }
+
+    /**
+     * Today where the site is, from its first second up to now.
+     */
+    public static function todaySoFar(Site $site): self
+    {
+        return new self(now($site->timezone)->toDateString(), $site->timezone, now()->toImmutable()->addSecond());
     }
 
     /**

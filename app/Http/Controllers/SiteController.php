@@ -46,12 +46,15 @@ class SiteController extends Controller
     {
         Gate::authorize('view', $site);
 
-        $length = in_array($request->integer('days'), SitePeriod::LENGTHS, true) ? $request->integer('days') : 30;
+        $choice = in_array($request->query('days'), SitePeriod::CHOICES, true) ? $request->query('days') : '30';
+        $period = SitePeriod::choose($site, $choice);
 
         return view('sites.show', [
             'team' => $team,
             'site' => $site,
-            'period' => SitePeriod::lastDays($site, $length),
+            'choice' => $choice,
+            'period' => $period,
+            'previous' => $period->previous(),
         ]);
     }
 

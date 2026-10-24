@@ -5,6 +5,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ShipperDownloadController;
 use App\Http\Controllers\SiteController;
+use App\Http\Controllers\SiteRealtimeController;
 use App\Http\Controllers\SiteTeamController;
 use App\Http\Controllers\SiteTokenController;
 use App\Http\Controllers\TeamController;
@@ -48,6 +49,7 @@ Route::middleware('auth')->group(function () {
             Route::get('/teams/{team}/sites/create', [SiteController::class, 'create'])->name('teams.sites.create');
             Route::post('/teams/{team}/sites', [SiteController::class, 'store'])->name('teams.sites.store');
             Route::get('/teams/{team}/sites/{site}', [SiteController::class, 'show'])->name('teams.sites.show');
+            Route::get('/teams/{team}/sites/{site}/realtime', SiteRealtimeController::class)->name('teams.sites.realtime');
             Route::get('/teams/{team}/sites/{site}/settings', [SiteController::class, 'edit'])->name('teams.sites.edit');
             Route::put('/teams/{team}/sites/{site}', [SiteController::class, 'update'])->name('teams.sites.update');
             Route::delete('/teams/{team}/sites/{site}', [SiteController::class, 'destroy'])->name('teams.sites.destroy');
