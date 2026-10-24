@@ -51,7 +51,7 @@ class SiteManagementTest extends TestCase
         [$viewer, $team] = $this->memberOf(TeamRole::Viewer);
         $site = Site::factory()->for($team)->create();
 
-        $this->actingAs($viewer)->get(route('teams.show', $team))->assertOk()->assertSee($site->name);
+        $this->actingAs($viewer)->get(route('teams.sites.index', $team))->assertOk()->assertSee($site->name);
         $this->actingAs($viewer)->get(route('teams.sites.show', [$team, $site]))->assertOk();
         $this->actingAs($viewer)->get(route('teams.sites.edit', [$team, $site]))->assertForbidden();
         $this->actingAs($viewer)
@@ -175,7 +175,7 @@ class SiteManagementTest extends TestCase
 
         $this->actingAs($admin)
             ->delete(route('teams.sites.destroy', [$team, $site]))
-            ->assertRedirect(route('teams.show', $team));
+            ->assertRedirect(route('teams.sites.index', $team));
 
         $this->assertModelMissing($site);
     }

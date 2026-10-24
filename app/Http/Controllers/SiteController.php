@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Analytics\SitePeriod;
+use App\Analytics\SiteSparklines;
 use App\Http\Requests\SaveSiteRequest;
 use App\Ingest\ShipperSetup;
 use App\Models\Site;
@@ -14,6 +15,22 @@ use Illuminate\View\View;
 
 class SiteController extends Controller
 {
+    /**
+     * List the team's sites.
+     */
+    public function index(Team $team): View
+    {
+        Gate::authorize('view', $team);
+
+        $sites = $team->sites()->orderBy('name')->get();
+
+        return view('sites.index', [
+            'team' => $team,
+            'sites' => $sites,
+            'visitors' => SiteSparklines::visitors($sites),
+        ]);
+    }
+
     /**
      * Show the form to add a site to the team.
      */
@@ -96,6 +113,6 @@ class SiteController extends Controller
 
         $site->delete();
 
-        return redirect()->route('teams.show', $team)->with('status', __(':site was deleted.', ['site' => $site->name]));
+        return redirect()->route('teams.sites.index', $team)->with('status', __(':site was deleted.', ['site' => $site->name]));
     }
 }

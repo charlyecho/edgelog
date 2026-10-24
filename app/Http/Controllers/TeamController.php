@@ -33,20 +33,17 @@ class TeamController extends Controller
 
         $team = $createTeam->handle($request->user(), $validated['name']);
 
-        return redirect()->route('teams.show', $team)->with('status', __('Team created.'));
+        return redirect()->route('teams.sites.index', $team)->with('status', __('Team created.'));
     }
 
     /**
-     * Show the team's dashboard: its sites.
+     * A team's own address leads to its sites.
      */
-    public function show(Team $team): View
+    public function show(Team $team): RedirectResponse
     {
         Gate::authorize('view', $team);
 
-        return view('teams.show', [
-            'team' => $team,
-            'sites' => $team->sites()->orderBy('name')->get(),
-        ]);
+        return redirect()->route('teams.sites.index', $team);
     }
 
     /**

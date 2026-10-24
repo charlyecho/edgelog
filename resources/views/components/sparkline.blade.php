@@ -1,7 +1,6 @@
-@props(['values', 'color'])
+@props(['values', 'color', 'width' => 160])
 
 @php
-    $width = 160;
     $height = 36;
     $known = array_filter($values, fn ($value) => $value !== null);
     $top = max([1, ...$known]);
@@ -25,7 +24,7 @@
 @endphp
 
 @if (count($known) > 1)
-    <svg viewBox="-4 0 {{ $width + 8 }} {{ $height }}" class="mt-2 h-9 w-full max-w-44 overflow-visible" aria-hidden="true">
+    <svg viewBox="-4 0 {{ $width + 8 }} {{ $height }}" {{ $attributes->class('mt-2 h-9 w-full max-w-44 overflow-visible') }} aria-hidden="true">
         <line x1="0" x2="{{ $width }}" y1="{{ $height - 3 }}" y2="{{ $height - 3 }}" stroke="var(--grid)" />
         <path d="{{ trim($line) }}" fill="none" stroke="{{ $color }}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
         @if ($lastIndex !== null)

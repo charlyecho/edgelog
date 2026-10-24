@@ -1,6 +1,6 @@
 <x-layouts.app :title="__('Team')" :lede="__('Who may see :team\'s sites, and what they may change.', ['team' => $team->name])">
     <x-slot:trail>
-        <x-crumb :href="route('teams.show', $team)">{{ $team->name }}</x-crumb>
+        <x-crumb :href="route('teams.sites.index', $team)">{{ $team->name }}</x-crumb>
     </x-slot:trail>
 
     <div class="grid max-w-5xl gap-8">

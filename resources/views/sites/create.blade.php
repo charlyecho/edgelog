@@ -1,6 +1,6 @@
 <x-layouts.app :title="__('Add a site')" :lede="__('The site will belong to :team.', ['team' => $team->name])">
     <x-slot:trail>
-        <x-crumb :href="route('teams.show', $team)">{{ $team->name }}</x-crumb>
+        <x-crumb :href="route('teams.sites.index', $team)">{{ $team->name }}</x-crumb>
     </x-slot:trail>
 
     <x-card class="max-w-xl">
@@ -11,7 +11,7 @@
             <x-timezone-select :value="config('app.timezone')" />
             <div class="flex items-center gap-2">
                 <x-button>{{ __('Add the site') }}</x-button>
-                <x-button variant="secondary" :href="route('teams.show', $team)">{{ __('Cancel') }}</x-button>
+                <x-button variant="secondary" :href="route('teams.sites.index', $team)">{{ __('Cancel') }}</x-button>
             </div>
         </form>
     </x-card>

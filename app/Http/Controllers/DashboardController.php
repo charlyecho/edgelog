@@ -19,6 +19,6 @@ class DashboardController extends Controller
             return redirect()->route('teams.create');
         }
 
-        return redirect()->route('teams.show', $team);
+        return redirect()->route('teams.sites.index', $team);
     }
 }

@@ -1,6 +1,6 @@
 <x-layouts.app :title="__('Site settings')" :lede="__('The address, the token the site sends its data with, and the team it belongs to.')">
     <x-slot:trail>
-        <x-crumb :href="route('teams.show', $team)">{{ $team->name }}</x-crumb>
+        <x-crumb :href="route('teams.sites.index', $team)">{{ $team->name }}</x-crumb>
         <x-crumb :href="route('teams.sites.show', [$team, $site])">{{ $site->name }}</x-crumb>
     </x-slot:trail>
 

@@ -53,8 +53,10 @@ class TeamManagementTest extends TestCase
     {
         [$team, $users] = $this->teamWith(['viewer' => TeamRole::Viewer]);
 
-        $this->actingAs($users['viewer'])->get(route('teams.show', $team))->assertOk()->assertSee($team->name);
+        $this->actingAs($users['viewer'])->get(route('teams.show', $team))->assertRedirect(route('teams.sites.index', $team));
+        $this->actingAs($users['viewer'])->get(route('teams.sites.index', $team))->assertOk()->assertSee($team->name);
         $this->actingAs(User::factory()->create())->get(route('teams.show', $team))->assertForbidden();
+        $this->actingAs(User::factory()->create())->get(route('teams.sites.index', $team))->assertForbidden();
     }
 
     public function test_team_urls_use_the_uuid(): void
@@ -62,6 +64,7 @@ class TeamManagementTest extends TestCase
         [$team] = $this->teamWith(['owner' => TeamRole::Owner]);
 
         $this->assertSame(url("/teams/{$team->uuid}"), route('teams.show', $team));
+        $this->assertSame(url("/teams/{$team->uuid}/sites"), route('teams.sites.index', $team));
         $this->assertTrue(str($team->uuid)->isUuid());
     }
 
@@ -78,7 +81,7 @@ class TeamManagementTest extends TestCase
         $user = User::factory()->withTeam()->create();
         $team = Team::factory()->withMember($user, TeamRole::Viewer)->create();
 
-        $this->actingAs($user)->get(route('teams.show', $team))->assertOk();
+        $this->actingAs($user)->get(route('teams.sites.index', $team))->assertOk();
 
         $this->assertTrue($user->fresh()->currentTeam->is($team));
     }
@@ -89,7 +92,7 @@ class TeamManagementTest extends TestCase
         $team = Team::factory()->withMember($user, TeamRole::Viewer)->create();
         $this->actingAs($user)->get(route('teams.show', $team));
 
-        $this->actingAs($user)->get(route('dashboard'))->assertRedirect(route('teams.show', $team));
+        $this->actingAs($user)->get(route('dashboard'))->assertRedirect(route('teams.sites.index', $team));
     }
 
     public function test_opening_a_team_of_someone_else_does_not_change_the_current_team(): void

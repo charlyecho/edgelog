@@ -46,7 +46,7 @@
                             </a>
                         @endforeach
 
-                        <a href="{{ route('teams.show', $railTeam) }}" @class([
+                        <a href="{{ route('teams.sites.index', $railTeam) }}" @class([
                             'flex min-h-10 items-center rounded-lg px-2 text-ink-2 no-underline hover:bg-sunk',
                             'mt-1 border-t border-grid' => $railSites->isNotEmpty(),
                         ])>{{ __('All sites') }}</a>
@@ -54,7 +54,7 @@
                         @if ($railTeams->count() > 1)
                             <p class="mt-1 border-t border-grid px-2 pt-2 pb-1 text-[11.5px] font-semibold text-ink-3">{{ __('Switch team') }}</p>
                             @foreach ($railTeams as $team)
-                                <a href="{{ route('teams.show', $team) }}" @class([
+                                <a href="{{ route('teams.sites.index', $team) }}" @class([
                                     'flex min-h-9 items-center gap-2.5 rounded-lg px-2 no-underline hover:bg-sunk',
                                     'font-semibold' => $team->is($railTeam),
                                 ])>
@@ -80,7 +80,7 @@
                             <x-rail-link :href="route('teams.sites.edit', [$railTeam, $railSite])" icon="sliders" :active="request()->routeIs('teams.sites.edit')">{{ __('Site settings') }}</x-rail-link>
                         @endcan
                     @else
-                        <x-rail-link :href="route('teams.show', $railTeam)" icon="globe" :active="request()->routeIs('teams.show', 'teams.sites.create')">{{ __('Sites') }}</x-rail-link>
+                        <x-rail-link :href="route('teams.sites.index', $railTeam)" icon="globe" :active="request()->routeIs('teams.sites.index', 'teams.sites.create')">{{ __('Sites') }}</x-rail-link>
                     @endif
                 </nav>
             @endif
