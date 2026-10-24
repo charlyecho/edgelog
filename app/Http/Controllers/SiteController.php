@@ -1,0 +1,89 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Http\Requests\SaveSiteRequest;
+use App\Models\Site;
+use App\Models\Team;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\View\View;
+
+class SiteController extends Controller
+{
+    /**
+     * Show the form to add a site to the team.
+     */
+    public function create(Team $team): View
+    {
+        Gate::authorize('create', [Site::class, $team]);
+
+        return view('sites.create', ['team' => $team]);
+    }
+
+    /**
+     * Add a site to the team and show its token once.
+     */
+    public function store(SaveSiteRequest $request, Team $team): RedirectResponse
+    {
+        $site = $team->sites()->make($request->siteAttributes());
+        $token = $site->fillNewToken();
+        $site->save();
+
+        return redirect()
+            ->route('teams.sites.edit', [$team, $site])
+            ->with('status', __('Site added.'))
+            ->with('site_token', $token);
+    }
+
+    /**
+     * Show the site's dashboard.
+     */
+    public function show(Team $team, Site $site): View
+    {
+        Gate::authorize('view', $site);
+
+        return view('sites.show', ['team' => $team, 'site' => $site]);
+    }
+
+    /**
+     * Show the site's settings: name, URL, token, team and deletion.
+     */
+    public function edit(Request $request, Team $team, Site $site): View
+    {
+        Gate::authorize('update', $site);
+
+        $otherTeams = $request->user()->teams
+            ->reject(fn (Team $other) => $other->is($team))
+            ->filter(fn (Team $other) => $other->membership->role->canManageSites());
+
+        return view('sites.edit', [
+            'team' => $team,
+            'site' => $site,
+            'otherTeams' => $otherTeams,
+        ]);
+    }
+
+    /**
+     * Change the site's name and URL.
+     */
+    public function update(SaveSiteRequest $request, Team $team, Site $site): RedirectResponse
+    {
+        $site->update($request->siteAttributes());
+
+        return back()->with('status', __('Site saved.'));
+    }
+
+    /**
+     * Delete the site.
+     */
+    public function destroy(Team $team, Site $site): RedirectResponse
+    {
+        Gate::authorize('delete', $site);
+
+        $site->delete();
+
+        return redirect()->route('teams.show', $team)->with('status', __(':site was deleted.', ['site' => $site->name]));
+    }
+}

@@ -2,6 +2,8 @@
 
 namespace Database\Factories;
 
+use App\Enums\TeamRole;
+use App\Models\Team;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
@@ -41,5 +43,19 @@ class UserFactory extends Factory
         return $this->state(fn (array $attributes) => [
             'email_verified_at' => null,
         ]);
+    }
+
+    /**
+     * Give the user a team they own, set as their current team.
+     */
+    public function withTeam(): static
+    {
+        return $this->afterCreating(function (User $user) {
+            $team = Team::factory()->withMember($user, TeamRole::Owner)->create([
+                'name' => "{$user->name}'s Team",
+            ]);
+
+            $user->switchTeam($team);
+        });
     }
 }

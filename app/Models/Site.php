@@ -1,0 +1,122 @@
+<?php
+
+namespace App\Models;
+
+use Database\Factories\SiteFactory;
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Hidden;
+use Illuminate\Database\Eloquent\Attributes\RouteKey;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Str;
+
+#[Fillable(['name', 'url'])]
+#[Hidden(['token_hash'])]
+#[RouteKey('uuid')]
+class Site extends Model
+{
+    /** @use HasFactory<SiteFactory> */
+    use HasFactory, HasUuids;
+
+    /**
+     * The prefix every site token starts with.
+     */
+    public const string TOKEN_PREFIX = 'edg_';
+
+    /**
+     * Get the columns that should receive a unique identifier.
+     *
+     * @return list<string>
+     */
+    public function uniqueIds(): array
+    {
+        return ['uuid'];
+    }
+
+    /**
+     * Get the attributes that should be cast.
+     *
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'token_generated_at' => 'datetime',
+        ];
+    }
+
+    /**
+     * Get the team the site belongs to.
+     *
+     * @return BelongsTo<Team, $this>
+     */
+    public function team(): BelongsTo
+    {
+        return $this->belongsTo(Team::class);
+    }
+
+    /**
+     * Get the host name of the site's URL.
+     */
+    public function host(): string
+    {
+        return parse_url($this->url, PHP_URL_HOST) ?: $this->url;
+    }
+
+    /**
+     * Give the site a new token, without saving it.
+     *
+     * Only the hash is kept, so the plain token is returned to be shown once.
+     */
+    public function fillNewToken(): string
+    {
+        $token = self::TOKEN_PREFIX.Str::random(40);
+
+        $this->forceFill([
+            'token_hash' => self::hashToken($token),
+            'token_generated_at' => now(),
+        ]);
+
+        return $token;
+    }
+
+    /**
+     * Hash a plain site token the way it is stored.
+     */
+    public static function hashToken(string $token): string
+    {
+        return hash('sha256', $token);
+    }
+
+    /**
+     * Find the site a plain token belongs to.
+     */
+    public static function findByToken(string $token): ?self
+    {
+        return static::query()->where('token_hash', self::hashToken($token))->first();
+    }
+
+    /**
+     * Reduce a URL to its origin: lowercase scheme and host, and the port if any.
+     */
+    public static function normalizeUrl(string $url): string
+    {
+        $url = trim($url);
+
+        if (! preg_match('#^[a-z][a-z0-9+.-]*://#i', $url)) {
+            $url = "https://{$url}";
+        }
+
+        $parts = parse_url($url);
+
+        if (! isset($parts['scheme'], $parts['host'])) {
+            return $url;
+        }
+
+        $origin = Str::lower($parts['scheme']).'://'.Str::lower($parts['host']);
+
+        return isset($parts['port']) ? "{$origin}:{$parts['port']}" : $origin;
+    }
+}

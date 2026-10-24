@@ -3,7 +3,76 @@
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 @source '../../storage/framework/views/*.php';
 
-@theme {
-    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
-        'Segoe UI Symbol', 'Noto Color Emoji';
+/* The palette follows Skald's: ink on a cool paper, colour reserved for data. */
+:root {
+    color-scheme: light;
+    --page: #edf0f3;
+    --surface: #fbfcfd;
+    --sunk: #e4e9ee;
+    --ink: #17212b;
+    --ink-2: #4f5d6b;
+    --ink-3: #5a6672;
+    --rule: #d8dfe6;
+    --grid: #e6ebf0;
+    --gap: #c3ccd5;
+    --good: #18734a;
+    --warn: #9a6400;
+    --bad: #c0352f;
+    --shadow: 0 1px 0 rgba(23, 33, 43, 0.04), 0 8px 24px -12px rgba(23, 33, 43, 0.18);
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme='light']) {
+        color-scheme: dark;
+        --page: #0d1319;
+        --surface: #141c24;
+        --sunk: #1b252f;
+        --ink: #e4eaf0;
+        --ink-2: #a9b5c1;
+        --ink-3: #8593a0;
+        --rule: #26313c;
+        --grid: #1e2832;
+        --gap: #3a4652;
+        --good: #48b883;
+        --warn: #d9a440;
+        --bad: #ef6b63;
+        --shadow: 0 1px 0 rgba(0, 0, 0, 0.3), 0 10px 30px -14px rgba(0, 0, 0, 0.7);
+    }
+}
+
+@theme inline {
+    --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+    --color-page: var(--page);
+    --color-surface: var(--surface);
+    --color-sunk: var(--sunk);
+    --color-ink: var(--ink);
+    --color-ink-2: var(--ink-2);
+    --color-ink-3: var(--ink-3);
+    --color-rule: var(--rule);
+    --color-grid: var(--grid);
+    --color-gap: var(--gap);
+    --color-good: var(--good);
+    --color-warn: var(--warn);
+    --color-bad: var(--bad);
+
+    --shadow-card: var(--shadow);
+}
+
+@layer base {
+    body {
+        font-size: 14px;
+        line-height: 1.5;
+    }
+
+    :focus-visible {
+        outline: 2px solid var(--ink);
+        outline-offset: 2px;
+        border-radius: 6px;
+    }
+
+    details > summary::-webkit-details-marker {
+        display: none;
+    }
 }
