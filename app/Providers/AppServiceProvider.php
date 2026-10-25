@@ -7,6 +7,7 @@ use App\Analytics\Geo\Places;
 use App\Models\Site;
 use App\Models\Team;
 use Illuminate\Contracts\View\View as ViewContract;
+use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
@@ -26,6 +27,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        $this->trustProxies();
+
         Password::defaults(fn () => $this->app->isProduction()
             ? Password::min(12)->uncompromised()
             : Password::min(12));
@@ -44,5 +47,19 @@ class AppServiceProvider extends ServiceProvider
                 'railTeams' => $user->teams,
             ]);
         });
+    }
+
+    /**
+     * Believe the X-Forwarded-* headers of the proxies set in TRUSTED_PROXIES
+     * (config app.trusted_proxies), so the login throttle and every address
+     * read from a request is the visitor's, not the proxy's.
+     */
+    private function trustProxies(): void
+    {
+        $proxies = trim((string) config('app.trusted_proxies'));
+
+        if ($proxies !== '') {
+            TrustProxies::at($proxies === '*' ? '*' : array_values(array_filter(array_map('trim', explode(',', $proxies)))));
+        }
     }
 }

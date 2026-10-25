@@ -60,14 +60,19 @@
 
     @if ($live)
         @php($todayDay = $period->days[$period->first->toDateString()] ?? null)
-        <div class="mb-3 flex flex-wrap items-center justify-between gap-3 text-[13px] text-ink-2" data-live-refresh="{{ SitePeriod::LIVE_SECONDS }}">
+        <div class="mb-3 flex flex-wrap items-center justify-between gap-3 text-[13px] text-ink-2" data-live-refresh="{{ $countedAt === null ? 15 : 120 }}">
             <p>
                 <span class="font-semibold text-ink">{{ __('Today so far') }}</span> ·
-                {{ __(':day, 00:00 to :time (:timezone): counted from the log now, with the same rules as the whole days. The audit checks it once the day is over.', [
-                    'day' => $period->first->translatedFormat('l j M'),
-                    'time' => ($todayDay?->last_seen ?? now())->setTimezone($site->timezone)->format('H:i'),
-                    'timezone' => $site->timezone,
-                ]) }}
+                @if ($countedAt === null)
+                    {{ __('Today is being counted: the queue is reading today\'s log, and this page shows it as soon as it is done.') }}
+                @else
+                    {{ __(':day, 00:00 to :time (:timezone), counted at :counted with the same rules as the whole days. The audit checks it once the day is over.', [
+                        'day' => $period->first->translatedFormat('l j M'),
+                        'time' => ($todayDay?->last_seen ?? now())->setTimezone($site->timezone)->format('H:i'),
+                        'timezone' => $site->timezone,
+                        'counted' => \Carbon\CarbonImmutable::createFromTimestamp($countedAt, $site->timezone)->format('H:i'),
+                    ]) }}
+                @endif
                 <span data-live-state>{{ __('Refreshed every 2 minutes.') }}</span>
             </p>
             <button type="button" class="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-rule bg-surface px-3 font-semibold text-ink hover:border-ink-3" data-live-pause data-pause="{{ __('Pause') }}" data-resume="{{ __('Resume') }}" data-paused="{{ __('Paused.') }}" data-running="{{ __('Refreshed every 2 minutes.') }}">
@@ -78,7 +83,8 @@
         <x-period-line :period="$period" />
     @endif
 
-    @if ($live && ! $period->hasFigures())
+    @if ($live && $countedAt === null)
+    @elseif ($live && ! $period->hasFigures())
         <x-card :title="__('Nothing in today\'s log yet')" :description="__('Today\'s figures appear here as soon as the site sends its first log lines of the day.')">
             <p class="text-ink-2">{{ __('Whole days stay under the other periods.') }}</p>
         </x-card>

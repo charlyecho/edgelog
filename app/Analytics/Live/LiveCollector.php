@@ -2,21 +2,16 @@
 
 namespace App\Analytics\Live;
 
-use App\Analytics\Classification\Classifier;
+use App\Analytics\Classification\Verdict;
 use App\Analytics\Classification\VisitEvidence;
-use App\Analytics\DayWindow;
 use App\Analytics\Geo\Places;
-use App\Analytics\LogWindowReader;
 use App\Analytics\NotPages;
-use App\Analytics\OwnPaths;
 use App\Analytics\PageRule;
 use App\Analytics\SiteHosts;
 use App\Analytics\Sources;
-use App\Analytics\TimeOrdered;
 use App\Analytics\UserAgentLabels;
 use App\Enums\SourceType;
 use App\Enums\TrafficGroup;
-use App\Ingest\IngestLog;
 use App\Ingest\LogHit;
 use App\Models\Site;
 
@@ -24,9 +19,9 @@ use App\Models\Site;
  * Today so far, for the Real time tab: who is on the site now, what they
  * read, where they came from, and which machines are fetching.
  *
- * It reads today's lines with the same rules as the daily count, so its
- * "visitors today" is the count the day will have so far. It never writes
- * the history: the day is counted for good once it is over.
+ * It is given today's requests by the daily count's own pass (TodayCounter),
+ * so its "visitors today" is the count the day will have so far. It never
+ * writes the history: the day is counted for good once it is over.
  */
 final class LiveCollector
 {
@@ -36,78 +31,109 @@ final class LiveCollector
 
     public const int MINUTES = 30;
 
+    private Sources $sources;
+
+    private NotPages $notPages;
+
+    private int $gap;
+
+    private int $nowTime;
+
+    private int $firstMinute;
+
+    /**
+     * @var list<int>
+     */
+    private array $requestsByMinute;
+
+    private LiveSnapshot $snapshot;
+
+    /**
+     * @var array<string, array<string, mixed>>
+     */
+    private array $open = [];
+
+    /**
+     * @var list<array<string, mixed>>
+     */
+    private array $visits = [];
+
     public function __construct(private readonly Places $places) {}
 
+    /**
+     * Today so far, read from the log now (TodayCounter reads it once for
+     * every live figure).
+     */
     public function collect(Site $site): LiveSnapshot
     {
+        return app(TodayCounter::class)->count($site)['live'];
+    }
+
+    /**
+     * Start a count of today: then every request of the site's hosts, in time order, and finish().
+     */
+    public function begin(Site $site): self
+    {
         $now = now()->toImmutable();
-        $window = DayWindow::todaySoFar($site);
         $hosts = SiteHosts::of($site);
-        $reader = new LogWindowReader(IngestLog::for($site)->folder(), $site->log_format->parser(), $window);
-        $gap = (int) config('analytics.visit_gap_minutes') * 60;
-        $notPages = NotPages::of($site);
-        $ownPaths = OwnPaths::of($site);
 
-        $evidence = new VisitEvidence($hosts->hosts, (bool) config('analytics.require_rendering'), $gap,
-            (int) config('analytics.too_fast_pages'), (int) config('analytics.too_fast_seconds'), $notPages, $ownPaths);
+        $this->sources = new Sources($hosts->hosts);
+        $this->notPages = NotPages::of($site);
+        $this->gap = (int) config('analytics.visit_gap_minutes') * 60;
+        $this->nowTime = $now->getTimestamp();
+        $this->firstMinute = intdiv($this->nowTime, 60) * 60 - (self::MINUTES - 1) * 60;
+        $this->requestsByMinute = array_fill(0, self::MINUTES, 0);
+        $this->snapshot = new LiveSnapshot($now, $site->timezone);
+        $this->open = [];
+        $this->visits = [];
 
-        foreach ($reader->hits() as $hit) {
-            if ($hosts->covers($hit)) {
-                $evidence->add($hit);
-            }
+        return $this;
+    }
+
+    public function add(LogHit $hit, Verdict $verdict): void
+    {
+        $time = $hit->when->getTimestamp();
+
+        if ($time > $this->nowTime) {
+            return;
         }
 
-        $evidence->finish();
-        $classifier = new Classifier($evidence, $ownPaths);
-        $sources = new Sources($hosts->hosts);
+        $recent = $time >= $this->nowTime - self::RECENT_SECONDS;
 
-        $nowTime = $now->getTimestamp();
-        $firstMinute = intdiv($nowTime, 60) * 60 - (self::MINUTES - 1) * 60;
-        $requestsByMinute = array_fill(0, self::MINUTES, 0);
-        $snapshot = new LiveSnapshot($now, $site->timezone);
-
-        /** @var array<string, array<string, mixed>> $open */
-        $open = [];
-        $visits = [];
-
-        foreach (TimeOrdered::of($reader->hits(), 120) as $hit) {
-            if (! $hosts->covers($hit)) {
-                continue;
-            }
-
-            $time = $hit->when->getTimestamp();
-            $recent = $time >= $nowTime - self::RECENT_SECONDS;
-            $verdict = $classifier->classify($hit);
-
-            if ($time >= $firstMinute) {
-                $requestsByMinute[intdiv($time - $firstMinute, 60)]++;
-            }
-
-            if ($recent) {
-                match ($verdict->group) {
-                    TrafficGroup::AnswerEngines => $snapshot->count('engines', $verdict->name),
-                    TrafficGroup::SearchEngines => $snapshot->count('search', $verdict->name),
-                    TrafficGroup::Bots => $snapshot->bots++,
-                    default => null,
-                };
-            }
-
-            if ($verdict->group !== TrafficGroup::People) {
-                continue;
-            }
-
-            $this->person($hit, $verdict->citedBy, $sources, $gap, $notPages, $open, $visits);
-
-            if ($recent && PageRule::isPage($hit, $notPages)) {
-                $snapshot->pagesRecent++;
-                $snapshot->count('pages', substr($hit->path(), 0, 200) ?: '/');
-            }
+        if ($time >= $this->firstMinute) {
+            $this->requestsByMinute[intdiv($time - $this->firstMinute, 60)]++;
         }
 
+        if ($recent) {
+            match ($verdict->group) {
+                TrafficGroup::AnswerEngines => $this->snapshot->count('engines', $verdict->name),
+                TrafficGroup::SearchEngines => $this->snapshot->count('search', $verdict->name),
+                TrafficGroup::Bots => $this->snapshot->bots++,
+                default => null,
+            };
+        }
+
+        if ($verdict->group !== TrafficGroup::People) {
+            return;
+        }
+
+        $this->person($hit, $verdict->citedBy, $this->sources, $this->gap, $this->notPages, $this->open, $this->visits);
+
+        if ($recent && PageRule::isPage($hit, $this->notPages)) {
+            $this->snapshot->pagesRecent++;
+            $this->snapshot->count('pages', substr($hit->path(), 0, 200) ?: '/');
+        }
+    }
+
+    public function finish(): LiveSnapshot
+    {
+        $snapshot = $this->snapshot;
+        $nowTime = $this->nowTime;
+        $firstMinute = $this->firstMinute;
         $signedIn = [];
         $signedInRecent = [];
 
-        foreach ([...$visits, ...array_values($open)] as $visit) {
+        foreach ([...$this->visits, ...array_values($this->open)] as $visit) {
             foreach ($visit['users'] as $uid => $true) {
                 $signedIn[$uid] = true;
 
@@ -155,7 +181,7 @@ final class LiveCollector
         $snapshot->signedInRecent = count($signedInRecent);
 
         $snapshot->firstMinute = $firstMinute;
-        $snapshot->requestsByMinute = $requestsByMinute;
+        $snapshot->requestsByMinute = $this->requestsByMinute;
         $snapshot->visitorsByMinute = array_replace(array_fill(0, self::MINUTES, 0), $snapshot->visitorsByMinute);
         $snapshot->finish();
 

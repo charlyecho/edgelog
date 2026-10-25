@@ -16,8 +16,8 @@ use Carbon\CarbonImmutable;
 use Carbon\CarbonPeriod;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as Models;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Cache;
 
 /**
  * A run of a site's days read back from its history, and how complete it is.
@@ -25,8 +25,9 @@ use Illuminate\Support\Facades\Cache;
  * Only verified days are summed. A withheld day and a missing day are named,
  * never drawn as zero.
  *
- * Today so far is a period of its own (live()): counted from the log now, with
- * the same rules, held in memory and never stored; the audit has not seen it.
+ * Today so far is a period of its own (live()): counted by the queue from the
+ * log, with the same rules, kept in the cache and never stored; the audit has
+ * not seen it.
  */
 final class SitePeriod
 {
@@ -65,14 +66,9 @@ final class SitePeriod
     private array $money = [];
 
     /**
-     * How long today's figures are kept before they are counted again, in seconds.
+     * @param  ?array<string, mixed>  $live  today's figures so far (DayFigures::summary()), for a period of today only
      */
-    public const int LIVE_SECONDS = 120;
-
-    /**
-     * @param  ?DayFigures  $live  today's figures so far, for a period of today only
-     */
-    public function __construct(public readonly Site $site, public readonly CarbonImmutable $first, public readonly CarbonImmutable $last, private readonly ?DayFigures $live = null)
+    public function __construct(public readonly Site $site, public readonly CarbonImmutable $first, public readonly CarbonImmutable $last, private readonly ?array $live = null)
     {
         if ($live !== null) {
             $this->days = [$first->toDateString() => self::liveDay($first, $live)];
@@ -98,16 +94,16 @@ final class SitePeriod
     }
 
     /**
-     * Today so far where the site is, counted from the log now and kept two
-     * minutes; null when the log holds nothing of today yet.
+     * Today so far where the site is, from the figures the queue counted
+     * (RefreshToday); null when the log holds nothing of today yet.
+     *
+     * @param  ?array<string, mixed>  $figures  DayFigures::summary()
      */
-    public static function live(Site $site): ?self
+    public static function live(Site $site, ?array $figures): ?self
     {
-        $figures = Cache::remember("site-today:{$site->id}", self::LIVE_SECONDS, fn () => app(DayCollector::class)->collect($site, DayWindow::todaySoFar($site)) ?? false);
+        $today = now($site->timezone)->startOfDay()->toImmutable();
 
-        return $figures instanceof DayFigures && $figures->hits > 0
-            ? new self($site, now($site->timezone)->startOfDay()->toImmutable(), now($site->timezone)->startOfDay()->toImmutable(), $figures)
-            : null;
+        return ($figures['hits'] ?? 0) > 0 ? new self($site, $today, $today, $figures) : null;
     }
 
     /**
@@ -122,26 +118,25 @@ final class SitePeriod
      * Today's figures as a day of history, in memory only: shown with the
      * days' own code, never saved.
      */
-    private static function liveDay(CarbonImmutable $day, DayFigures $figures): SiteDay
+    /**
+     * @param  array<string, mixed>  $figures  DayFigures::summary()
+     */
+    private static function liveDay(CarbonImmutable $day, array $figures): SiteDay
     {
+        $at = fn (?int $time) => $time === null ? null : CarbonImmutable::createFromTimestamp($time);
+
         $siteDay = new SiteDay([
             'day' => $day->toDateString(),
             'status' => DayStatus::Verified,
-            'parsed' => $figures->parsed,
-            'unparsed' => $figures->unparsed,
-            'hits' => $figures->hits,
-            'cited_visits' => $figures->citedVisits,
-            'signed_in_users' => count($figures->users),
-            'signed_in_readers' => $figures->signedInReaders,
-            'stylesheets' => $figures->stylesheets,
-            'first_seen' => $figures->firstSeen,
-            'last_seen' => $figures->lastSeen,
-            'partial_from' => $figures->partialFrom,
+            ...Arr::only($figures, ['parsed', 'unparsed', 'hits', 'cited_visits', 'signed_in_users', 'signed_in_readers', 'stylesheets']),
+            'first_seen' => $at($figures['first_seen']),
+            'last_seen' => $at($figures['last_seen']),
+            'partial_from' => $at($figures['partial_from']),
         ]);
 
         return $siteDay->setRelation('groups', new Models(array_map(
-            fn (string $group) => new SiteDayGroup(['group' => $group, ...$figures->groups[$group]->toArray()]),
-            array_keys($figures->groups),
+            fn (string $group) => new SiteDayGroup(['group' => $group, ...$figures['groups'][$group]]),
+            array_keys($figures['groups']),
         )));
     }
 
@@ -271,7 +266,7 @@ final class SitePeriod
     public function signedInUsers(): int
     {
         if ($this->live !== null) {
-            return count($this->live->users);
+            return $this->live['signed_in_users'];
         }
 
         return SiteDayUser::query()
@@ -320,7 +315,7 @@ final class SitePeriod
     public function dailyCounts(CountKind $kind): array
     {
         if ($this->live !== null) {
-            return [$this->first->toDateString() => $this->live->countsOf($kind)];
+            return [$this->first->toDateString() => $this->live['counts'][$kind->value] ?? []];
         }
 
         $days = $this->verified()->mapWithKeys(fn (SiteDay $day, string $date) => [$day->id => $date]);
@@ -518,10 +513,10 @@ final class SitePeriod
         }
 
         if ($this->live !== null) {
-            $this->counts = $this->live->counts;
+            $this->counts = $this->live['counts'];
 
             foreach (CountKind::REVENUE as $kind) {
-                $this->money[0][$kind] = $this->live->counts[$kind] ?? [];
+                $this->money[0][$kind] = $this->live['counts'][$kind] ?? [];
             }
 
             return;

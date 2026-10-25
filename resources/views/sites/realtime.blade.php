@@ -25,7 +25,7 @@
     <div class="mb-3 flex flex-wrap items-center justify-between gap-3 text-[13px] text-ink-2" data-live-refresh="120">
         <p>
             <span class="font-semibold text-ink">{{ __('Now') }}</span> ·
-            {{ __('As of :time (:timezone), today\'s log so far, counted with the same rules as the whole days.', ['time' => $live->asOf->setTimezone($live->timezone)->format('H:i:s'), 'timezone' => $live->timezone]) }}
+            {{ __('Counted at :time (:timezone), today\'s log so far, with the same rules as the whole days.', ['time' => $live->asOf->setTimezone($live->timezone)->format('H:i:s'), 'timezone' => $live->timezone]) }}
             <span data-live-state>{{ __('Refreshed every 2 minutes.') }}</span>
         </p>
         <button type="button" class="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-rule bg-surface px-3 font-semibold text-ink hover:border-ink-3" data-live-pause data-pause="{{ __('Pause') }}" data-resume="{{ __('Resume') }}" data-paused="{{ __('Paused.') }}" data-running="{{ __('Refreshed every 2 minutes.') }}">

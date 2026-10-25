@@ -7,6 +7,7 @@ use App\Analytics\SiteSparklines;
 use App\Enums\IntegrationTool;
 use App\Http\Requests\SaveSiteRequest;
 use App\Ingest\ShipperSetup;
+use App\Jobs\RefreshToday;
 use App\Models\Site;
 use App\Models\Team;
 use Illuminate\Http\RedirectResponse;
@@ -65,12 +66,14 @@ class SiteController extends Controller
         Gate::authorize('view', $site);
 
         $choice = in_array($request->query('days'), [SitePeriod::TODAY, ...SitePeriod::CHOICES], true) ? $request->query('days') : '30';
+        $counted = $choice === SitePeriod::TODAY ? RefreshToday::latest($site) : null;
         $today = now($site->timezone)->startOfDay()->toImmutable();
         $period = $choice === SitePeriod::TODAY
-            ? SitePeriod::live($site) ?? new SitePeriod($site, $today, $today)
+            ? SitePeriod::live($site, $counted['figures'] ?? null) ?? new SitePeriod($site, $today, $today)
             : SitePeriod::choose($site, $choice);
 
         return view('sites.show', [
+            'countedAt' => $counted['counted_at'] ?? null,
             'team' => $team,
             'site' => $site,
             'choice' => $choice,

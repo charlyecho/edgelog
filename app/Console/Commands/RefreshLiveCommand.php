@@ -2,7 +2,7 @@
 
 namespace App\Console\Commands;
 
-use App\Jobs\RefreshLiveSnapshot;
+use App\Jobs\RefreshToday;
 use App\Models\Site;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
@@ -18,7 +18,7 @@ class RefreshLiveCommand extends Command
             ->whereHas('ingestStatus', fn ($query) => $query->where('last_contact_at', '>=', now()->subHours(2)))
             ->get();
 
-        $sites->each(fn (Site $site) => RefreshLiveSnapshot::dispatch($site));
+        $sites->each(fn (Site $site) => RefreshToday::dispatch($site));
 
         $this->components->info("Queued {$sites->count()} live refreshes.");
 

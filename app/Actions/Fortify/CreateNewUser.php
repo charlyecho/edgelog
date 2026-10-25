@@ -3,6 +3,7 @@
 namespace App\Actions\Fortify;
 
 use App\Actions\Teams\CreateTeam;
+use App\Models\TeamInvitation;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -20,6 +21,7 @@ class CreateNewUser implements CreatesNewUsers
 
     /**
      * Validate and create a newly registered user, with a team they own.
+     * With registration closed, only for an email holding a pending invitation.
      *
      * @param  array<string, string>  $input
      *
@@ -40,7 +42,11 @@ class CreateNewUser implements CreatesNewUsers
             ],
             'password' => [...$this->passwordRules(), 'different:email'],
             'team' => ['nullable', 'string', 'max:255'],
-        ])->validate();
+        ])->after(function ($validator) use ($input) {
+            if (! self::isOpenTo($input['email'])) {
+                $validator->errors()->add('email', __('Sign-up is by invitation only: use the email address your invitation was sent to.'));
+            }
+        })->validate();
 
         return DB::transaction(function () use ($input) {
             $user = User::create([
@@ -53,5 +59,14 @@ class CreateNewUser implements CreatesNewUsers
 
             return $user;
         });
+    }
+
+    /**
+     * Determine if an account may be created: registration is open, or the
+     * email holds a pending invitation.
+     */
+    public static function isOpenTo(?string $email): bool
+    {
+        return config('auth.registration_open') || ($email !== null && $email !== '' && TeamInvitation::isPendingFor($email));
     }
 }

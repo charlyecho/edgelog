@@ -175,6 +175,30 @@ final class DayFigures
     }
 
     /**
+     * The figures a period reads, as plain values a cache can keep: the
+     * groups, the breakdowns, and the day's own figures (SitePeriod::live()).
+     *
+     * @return array{parsed: int, unparsed: int, hits: int, cited_visits: int, signed_in_users: int, signed_in_readers: int, stylesheets: int, first_seen: ?int, last_seen: ?int, partial_from: ?int, groups: array<string, array<string, int>>, counts: array<string, array<string, int>>}
+     */
+    public function summary(): array
+    {
+        return [
+            'parsed' => $this->parsed,
+            'unparsed' => $this->unparsed,
+            'hits' => $this->hits,
+            'cited_visits' => $this->citedVisits,
+            'signed_in_users' => count($this->users),
+            'signed_in_readers' => $this->signedInReaders,
+            'stylesheets' => $this->stylesheets,
+            'first_seen' => $this->firstSeen?->getTimestamp(),
+            'last_seen' => $this->lastSeen?->getTimestamp(),
+            'partial_from' => $this->partialFrom?->getTimestamp(),
+            'groups' => array_map(fn (GroupFigures $group) => $group->toArray(), $this->groups),
+            'counts' => $this->counts,
+        ];
+    }
+
+    /**
      * The figures both roads count, flattened, for the audit to compare.
      *
      * @return array<string, int>

@@ -101,14 +101,16 @@ The daily run needs the scheduler and a queue worker. With cron:
 * * * * * cd /path/to/edgelog && php artisan schedule:run >> /dev/null 2>&1
 ```
 
-and a worker kept running (systemd, Supervisor):
+and two workers kept running (systemd, Supervisor): one for the daily counts and audits, one for
+the live pages (Real time, Today, Requests), so a long count of today never holds a day back:
 
 ```sh
 php artisan queue:work --timeout=1800
+php artisan queue:work --queue=live --timeout=300
 ```
 
-In development, `php artisan schedule:work` and `php artisan queue:work` do the same in a
-terminal.
+In development, `php artisan schedule:work` and `php artisan queue:work --queue=default,live`
+do the same in a terminal.
 
 ### Mail
 
@@ -190,11 +192,14 @@ from a new outside source starts a new one.
 A day before the site's first line is not recorded, never zero; a day the logs begin in is
 marked as partial.
 
-**Real time.** A `RefreshLiveSnapshot` counts today's log so far with the same rules and keeps it
-in the cache for 3 minutes (never in the history). One is queued as soon as a batch brings new
-lines (at most once a minute per site), and every two minutes by `edgelog:live` for each site that
-sent lines in the last two hours, so "active now" goes down when nothing arrives. Without a worker,
-the page counts the snapshot itself once it is older than 3 minutes. The site's **Real time** tab shows it: visitors active now and in
+**Real time.** A `RefreshToday` job, on the `live` queue, reads today's log so far once, with the
+daily count's own passes, and keeps three things in the cache (never in the history): the Real
+time snapshot, today's figures for Overview's **Today**, and the last hours' requests for Site's
+**Requests**. One is queued as soon as a batch brings new lines (at most once a minute per site),
+and every two minutes by `edgelog:live` for each site that sent lines in the last two hours; with
+no new line it stands up to 10 minutes, so "active now" still goes down when nothing arrives. The
+pages never count: they show the last count and its time, or "being counted" while the first of
+the day is made. The site's **Real time** tab shows it: visitors active now and in
 the last 30 minutes, visitors today, minute-by-minute charts, pages being read, the newest visits,
 and the AI assistants and crawlers fetching right now. The page reloads itself every two minutes
 unless paused.

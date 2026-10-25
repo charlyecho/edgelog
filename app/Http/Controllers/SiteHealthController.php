@@ -9,6 +9,7 @@ use App\Analytics\Security\SecurityPeriod;
 use App\Analytics\SitePeriod;
 use App\Enums\TrafficGroup;
 use App\Ingest\IngestLog;
+use App\Jobs\RefreshToday;
 use App\Models\Site;
 use App\Models\Team;
 use Illuminate\Http\Request;
@@ -45,7 +46,9 @@ class SiteHealthController extends Controller
     {
         Gate::authorize('view', $site);
 
-        $log = RecentRequests::latest($site);
+        $today = RefreshToday::latest($site);
+        $log = $today['requests'] ?? ['from' => RecentRequests::from()->getTimestamp(), 'until' => now()->getTimestamp(), 'total' => 0,
+            'by_group' => array_fill_keys(array_column(TrafficGroup::cases(), 'value'), 0), 'rows' => []];
         $filters = [
             'show' => in_array($request->query('show'), self::SHOWS, true) ? $request->query('show') : 'all',
             'group' => TrafficGroup::tryFrom((string) $request->query('group')),
@@ -61,6 +64,7 @@ class SiteHealthController extends Controller
             'team' => $team,
             'site' => $site,
             'log' => $log,
+            'countedAt' => $today['counted_at'] ?? null,
             'filters' => $filters,
             'methods' => array_values(array_unique(array_column($log['rows'], 'method'))),
             'rows' => new LengthAwarePaginator(array_slice($rows, ($page - 1) * self::PER_PAGE, self::PER_PAGE), count($rows), self::PER_PAGE, $page, [

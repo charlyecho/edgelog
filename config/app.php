@@ -123,4 +123,19 @@ return [
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Trusted Proxies
+    |--------------------------------------------------------------------------
+    |
+    | The reverse proxies or CDN (nginx in front, Cloudflare, a load balancer)
+    | whose X-Forwarded-* headers are believed: the visitor's address, scheme
+    | and host. A comma-separated list of addresses or ranges, or "*" for any
+    | address that reaches the app directly (only when nothing else can).
+    | Empty: no header is believed, and the address is the connection's.
+    |
+    */
+
+    'trusted_proxies' => env('TRUSTED_PROXIES'),
+
 ];

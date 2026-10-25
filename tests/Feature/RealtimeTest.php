@@ -3,14 +3,16 @@
 namespace Tests\Feature;
 
 use App\Analytics\Live\LiveCollector;
+use App\Analytics\Live\TodayCounter;
 use App\Ingest\IngestLog;
-use App\Jobs\RefreshLiveSnapshot;
+use App\Jobs\RefreshToday;
 use App\Models\Site;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class RealtimeTest extends TestCase
@@ -111,19 +113,21 @@ class RealtimeTest extends TestCase
             ->assertSee('from chatgpt.com')
             ->assertSee('ChatGPT-User');
 
-        $this->assertIsArray(Cache::get(RefreshLiveSnapshot::cacheKey($this->site)));
+        $this->assertIsArray(Cache::get(RefreshToday::cacheKey($this->site)));
     }
 
-    public function test_the_snapshot_survives_a_cache_that_unserializes_no_object(): void
+    public function test_the_count_survives_a_cache_that_unserializes_no_object(): void
     {
         config(['cache.default' => 'database', 'cache.serializable_classes' => false]);
         $this->writeToday();
-        $first = RefreshLiveSnapshot::latest($this->site);
+        $first = RefreshToday::latest($this->site);
 
-        $kept = RefreshLiveSnapshot::latest($this->site);
+        $kept = RefreshToday::latest($this->site);
 
-        $this->assertSame($first->toArray(), $kept->toArray());
-        $this->assertSame(3, $kept->visitorsToday);
+        $this->assertSame($first, $kept);
+        $this->assertSame(3, RefreshToday::snapshot($kept)->visitorsToday);
+        $this->assertSame(11 - 1, $kept['figures']['hits']);
+        $this->assertSame(10, $kept['requests']['total']);
     }
 
     public function test_only_sites_that_sent_lines_lately_are_refreshed(): void
@@ -135,8 +139,8 @@ class RealtimeTest extends TestCase
 
         $this->artisan('edgelog:live')->assertSuccessful();
 
-        Bus::assertDispatched(RefreshLiveSnapshot::class, fn (RefreshLiveSnapshot $job) => $job->site->is($this->site));
-        Bus::assertNotDispatched(RefreshLiveSnapshot::class, fn (RefreshLiveSnapshot $job) => $job->site->is($quiet));
+        Bus::assertDispatched(RefreshToday::class, fn (RefreshToday $job) => $job->site->is($this->site));
+        Bus::assertNotDispatched(RefreshToday::class, fn (RefreshToday $job) => $job->site->is($quiet));
     }
 
     public function test_others_cannot_see_the_real_time_tab(): void
@@ -146,16 +150,60 @@ class RealtimeTest extends TestCase
             ->assertForbidden();
     }
 
-    public function test_a_snapshot_older_than_three_minutes_is_counted_again(): void
+    public function test_a_count_older_than_three_minutes_is_counted_again_on_the_live_queue(): void
     {
         $this->writeToday();
-        $first = RefreshLiveSnapshot::latest($this->site);
+        $this->site->ingestStatus()->create(['last_batch_at' => now()]);
+        $first = RefreshToday::latest($this->site);
 
         $this->travel(2)->minutes();
-        $this->assertTrue(RefreshLiveSnapshot::latest($this->site)->asOf->equalTo($first->asOf));
+        $this->assertSame($first['counted_at'], RefreshToday::latest($this->site)['counted_at']);
 
+        Queue::fake();
         $this->travel(2)->minutes();
-        $this->assertTrue(RefreshLiveSnapshot::latest($this->site)->asOf->greaterThan($first->asOf));
+        RefreshToday::latest($this->site);
+
+        Queue::assertPushedOn(RefreshToday::QUEUE, RefreshToday::class);
+    }
+
+    public function test_without_a_new_line_the_count_stands_until_it_is_idle_too_long(): void
+    {
+        $this->writeToday();
+        $this->site->ingestStatus()->create(['last_batch_at' => now()]);
+        $first = RefreshToday::latest($this->site);
+
+        $this->travel(5)->minutes();
+        (new RefreshToday($this->site))->handle(app(TodayCounter::class));
+        $this->assertSame($first['counted_at'], RefreshToday::kept($this->site)['counted_at']);
+
+        $this->site->ingestStatus()->update(['last_batch_at' => now()]);
+        (new RefreshToday($this->site))->handle(app(TodayCounter::class));
+        $this->assertGreaterThan($first['counted_at'], RefreshToday::kept($this->site)['counted_at']);
+    }
+
+    public function test_a_page_never_counts_itself_while_the_queue_has_not(): void
+    {
+        Queue::fake();
+        $this->writeToday();
+        $viewer = User::factory()->create();
+        $this->site->team->members()->attach($viewer, ['role' => 'viewer']);
+
+        $this->actingAs($viewer)->get(route('teams.sites.realtime', [$this->site->team, $this->site]))->assertOk()->assertSee('Today is being counted');
+        $this->actingAs($viewer)->get(route('teams.sites.show', [$this->site->team, $this->site, 'days' => 'today']))->assertOk()->assertSee('Today is being counted');
+        $this->actingAs($viewer)->get(route('teams.sites.site.requests', [$this->site->team, $this->site]))->assertOk()->assertSee('Being counted');
+
+        Queue::assertPushed(RefreshToday::class, 1);
+        $this->assertNull(RefreshToday::kept($this->site));
+    }
+
+    public function test_yesterdays_count_is_never_shown_as_today(): void
+    {
+        $this->writeToday();
+        RefreshToday::latest($this->site);
+
+        $this->travelTo('2026-10-25 00:10:00');
+
+        $this->assertNull(RefreshToday::kept($this->site));
     }
 
     public function test_the_summary_shows_today_so_far_without_storing_it(): void

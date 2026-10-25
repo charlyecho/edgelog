@@ -114,4 +114,17 @@ return [
 
     'password_timeout' => env('AUTH_PASSWORD_TIMEOUT', 10800),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Open Registration
+    |--------------------------------------------------------------------------
+    |
+    | Whether anyone may create an account (and a team of their own). Closed,
+    | only someone holding a pending invitation can, with the email it was
+    | sent to: the other people join by invitation.
+    |
+    */
+
+    'registration_open' => (bool) env('REGISTRATION_OPEN', false),
+
 ];

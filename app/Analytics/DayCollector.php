@@ -3,6 +3,7 @@
 namespace App\Analytics;
 
 use App\Analytics\Classification\Classifier;
+use App\Analytics\Classification\Verdict;
 use App\Analytics\Classification\VisitEvidence;
 use App\Analytics\Crawlers\CrawlerCollector;
 use App\Analytics\Geo\Places;
@@ -13,6 +14,7 @@ use App\Analytics\Tally\DayTally;
 use App\Enums\ConversionAction;
 use App\Enums\CountKind;
 use App\Ingest\IngestLog;
+use App\Ingest\LogHit;
 use App\Models\Conversion;
 use App\Models\Site;
 
@@ -28,8 +30,10 @@ final class DayCollector
     /**
      * The day's figures, or null when the logs hold nothing for it (a day
      * before the site's first line is missing, never zero).
+     *
+     * @param  ?callable(LogHit, Verdict): void  $also  given every request of the site's hosts with its verdict, in time order: what else reads the same pass
      */
-    public function collect(Site $site, DayWindow $window): ?DayFigures
+    public function collect(Site $site, DayWindow $window, ?callable $also = null): ?DayFigures
     {
         $hosts = SiteHosts::of($site);
         $reader = new LogWindowReader(IngestLog::for($site)->folder(), $site->log_format->parser(), $window);
@@ -83,6 +87,10 @@ final class DayCollector
                 $security->add($hit, $verdict);
                 $crawlers->add($hit, $verdict);
                 $health->add($hit, $verdict);
+
+                if ($also !== null) {
+                    $also($hit, $verdict);
+                }
             } else {
                 $tally->otherHost($hit->host);
                 $security->add($hit, null);

@@ -13,6 +13,8 @@
 
     <p class="mt-4 flex justify-between text-[13px] text-ink-2">
         <a href="{{ route('password.request') }}" class="hover:text-ink">{{ __('Forgot password?') }}</a>
-        <a href="{{ route('register') }}" class="hover:text-ink">{{ __('Create an account') }}</a>
+        @if (config('auth.registration_open'))
+            <a href="{{ route('register') }}" class="hover:text-ink">{{ __('Create an account') }}</a>
+        @endif
     </p>
 </x-layouts.guest>

@@ -20,14 +20,16 @@ use App\Enums\TrafficGroup;
 use App\Ingest\IngestLog;
 use App\Ingest\LogHit;
 use App\Models\Site;
-use Illuminate\Support\Facades\Cache;
+use Carbon\CarbonImmutable;
 
 /**
  * Every request of the last few hours, newest first, for Site > Requests:
  * each with the group and the rule that put it there. The log is read from
  * the start of the site's day the window begins in, so a visit is judged
- * whole, with the same rules as the daily count. Nothing of it is stored:
- * the rows hold raw addresses, and live only in the cache for a minute.
+ * whole, with the same rules as the daily count: today's pass gives it its
+ * requests (TodayCounter), and it reads the log on its own only when the
+ * window reaches back into yesterday. Nothing of it is stored: the rows hold
+ * raw addresses, and live only in the cache.
  */
 final class RecentRequests
 {
@@ -38,28 +40,44 @@ final class RecentRequests
      */
     public const int CAP = 5000;
 
-    public const int KEEP_SECONDS = 60;
+    private int $from;
+
+    private int $until;
+
+    private Sources $sources;
+
+    private NotPages $notPages;
+
+    /**
+     * @var array<string, int>
+     */
+    private array $byGroup = [];
+
+    /**
+     * @var list<array<string, mixed>>
+     */
+    private array $rows = [];
 
     public function __construct(private readonly Places $places) {}
 
     /**
-     * The window's rows and requests by group, kept a minute.
-     *
-     * @return array{from: int, until: int, total: int, by_group: array<string, int>, rows: list<array<string, mixed>>}
+     * When the window begins: HOURS before now.
      */
-    public static function latest(Site $site): array
+    public static function from(): CarbonImmutable
     {
-        return Cache::remember("site-requests:{$site->id}", self::KEEP_SECONDS, fn () => app(self::class)->collect($site));
+        return now()->toImmutable()->subHours(self::HOURS);
     }
 
     /**
+     * Read the window on its own, from the start of the site's day it begins
+     * in: when it reaches back before today, which today's pass does not read.
+     *
      * @return array{from: int, until: int, total: int, by_group: array<string, int>, rows: list<array<string, mixed>>}
      */
     public function collect(Site $site): array
     {
         $now = now()->toImmutable();
-        $from = $now->subHours(self::HOURS);
-        $window = new DayWindow($from->setTimezone($site->timezone)->toDateString(), $site->timezone, $now->addSecond());
+        $window = new DayWindow(self::from()->setTimezone($site->timezone)->toDateString(), $site->timezone, $now->addSecond());
         $hosts = SiteHosts::of($site);
         $reader = new LogWindowReader(IngestLog::for($site)->folder(), $site->log_format->parser(), $window);
         $notPages = NotPages::of($site);
@@ -76,30 +94,59 @@ final class RecentRequests
 
         $evidence->finish();
         $classifier = new Classifier($evidence, $ownPaths);
-        $sources = new Sources($hosts->hosts);
-        $byGroup = array_fill_keys(array_column(TrafficGroup::cases(), 'value'), 0);
-        $rows = [];
+        $this->begin($site);
 
         foreach (TimeOrdered::of($reader->hits(), 120) as $hit) {
-            if (! $hosts->covers($hit) || $hit->when->lessThan($from)) {
-                continue;
-            }
-
-            $verdict = $classifier->classify($hit);
-            $byGroup[$verdict->group->value]++;
-            $rows[] = $this->row($hit, $verdict, PageRule::isPage($hit, $notPages), $sources);
-
-            if (count($rows) > self::CAP * 2) {
-                $rows = array_slice($rows, -self::CAP);
+            if ($hosts->covers($hit)) {
+                $this->add($hit, $classifier->classify($hit));
             }
         }
 
+        return $this->finish();
+    }
+
+    /**
+     * Start the window: then every request of the site's hosts, in time order, and finish().
+     */
+    public function begin(Site $site): self
+    {
+        $this->from = self::from()->getTimestamp();
+        $this->until = now()->getTimestamp();
+        $this->sources = new Sources(SiteHosts::of($site)->hosts);
+        $this->notPages = NotPages::of($site);
+        $this->byGroup = array_fill_keys(array_column(TrafficGroup::cases(), 'value'), 0);
+        $this->rows = [];
+
+        return $this;
+    }
+
+    public function add(LogHit $hit, Verdict $verdict): void
+    {
+        $time = $hit->when->getTimestamp();
+
+        if ($time < $this->from || $time > $this->until) {
+            return;
+        }
+
+        $this->byGroup[$verdict->group->value]++;
+        $this->rows[] = $this->row($hit, $verdict, PageRule::isPage($hit, $this->notPages), $this->sources);
+
+        if (count($this->rows) > self::CAP * 2) {
+            $this->rows = array_slice($this->rows, -self::CAP);
+        }
+    }
+
+    /**
+     * @return array{from: int, until: int, total: int, by_group: array<string, int>, rows: list<array<string, mixed>>}
+     */
+    public function finish(): array
+    {
         return [
-            'from' => $from->getTimestamp(),
-            'until' => $now->getTimestamp(),
-            'total' => array_sum($byGroup),
-            'by_group' => $byGroup,
-            'rows' => array_reverse(array_slice($rows, -self::CAP)),
+            'from' => $this->from,
+            'until' => $this->until,
+            'total' => array_sum($this->byGroup),
+            'by_group' => $this->byGroup,
+            'rows' => array_reverse(array_slice($this->rows, -self::CAP)),
         ];
     }
 

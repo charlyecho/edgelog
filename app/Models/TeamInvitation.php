@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Str;
 
 #[Fillable(['email', 'role', 'token_hash', 'expires_at', 'invited_by'])]
 #[Hidden(['token_hash'])]
@@ -61,6 +62,17 @@ class TeamInvitation extends Model
     public static function hashToken(string $token): string
     {
         return hash('sha256', $token);
+    }
+
+    /**
+     * Determine if an email address holds a pending, non-expired invitation.
+     */
+    public static function isPendingFor(string $email): bool
+    {
+        return static::query()
+            ->where('email', Str::lower($email))
+            ->where('expires_at', '>', now())
+            ->exists();
     }
 
     /**

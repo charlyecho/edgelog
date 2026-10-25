@@ -23,13 +23,17 @@
 
 <x-section-frame section="site" :team="$team" :site="$site" current="requests" :title="__('Requests')"
     :lede="__('Every request of the last :hours hours, newest first, with the group and the rule that decided it. Read from the log as it is now, with the same rules as the daily count; nothing of it is kept.', ['hours' => RecentRequests::HOURS])">
-    <div class="flex flex-wrap items-center justify-between gap-3 text-[13px] text-ink-2" data-live-refresh="60">
+    <div class="flex flex-wrap items-center justify-between gap-3 text-[13px] text-ink-2" data-live-refresh="{{ $countedAt === null ? 15 : 120 }}">
         <p>
             {{ __('Last :hours hours · the period bar does not apply to this log.', ['hours' => RecentRequests::HOURS]) }}
-            {{ __('As of :time (:timezone).', ['time' => $local($log['until'], 'H:i:s'), 'timezone' => $site->timezone]) }}
-            <span data-live-state>{{ __('Refreshed every minute.') }}</span>
+            @if ($countedAt === null)
+                {{ __('Being counted: the queue is reading the log, and this page shows it as soon as it is done.') }}
+            @else
+                {{ __('Counted at :time (:timezone).', ['time' => $local($countedAt, 'H:i:s'), 'timezone' => $site->timezone]) }}
+            @endif
+            <span data-live-state>{{ __('Refreshed every 2 minutes.') }}</span>
         </p>
-        <button type="button" class="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-rule bg-surface px-3 font-semibold text-ink hover:border-ink-3" data-live-pause data-pause="{{ __('Pause') }}" data-resume="{{ __('Resume') }}" data-paused="{{ __('Paused.') }}" data-running="{{ __('Refreshed every minute.') }}">
+        <button type="button" class="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-rule bg-surface px-3 font-semibold text-ink hover:border-ink-3" data-live-pause data-pause="{{ __('Pause') }}" data-resume="{{ __('Resume') }}" data-paused="{{ __('Paused.') }}" data-running="{{ __('Refreshed every 2 minutes.') }}">
             {{ __('Pause') }}
         </button>
     </div>
