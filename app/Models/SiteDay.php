@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Arr;
 
 /**
@@ -102,6 +103,38 @@ class SiteDay extends Model
     }
 
     /**
+     * @return HasMany<SiteDayCrawler, $this>
+     */
+    public function crawlers(): HasMany
+    {
+        return $this->hasMany(SiteDayCrawler::class);
+    }
+
+    /**
+     * @return HasOne<SiteDaySecurity, $this>
+     */
+    public function security(): HasOne
+    {
+        return $this->hasOne(SiteDaySecurity::class);
+    }
+
+    /**
+     * @return HasMany<SiteDaySuspect, $this>
+     */
+    public function suspects(): HasMany
+    {
+        return $this->hasMany(SiteDaySuspect::class);
+    }
+
+    /**
+     * @return HasMany<SiteDayAttack, $this>
+     */
+    public function attacks(): HasMany
+    {
+        return $this->hasMany(SiteDayAttack::class);
+    }
+
+    /**
      * Only the days whose figures may be shown: counted twice, and both roads agree.
      *
      * @param  Builder<SiteDay>  $query
@@ -172,6 +205,19 @@ class SiteDay extends Model
 
             self::rememberUsers($site, $day, $figures);
             self::storeVisits($siteDay, $figures);
+            self::rememberPages($site, $day, $figures);
+            self::storeSecurity($siteDay, $figures);
+
+            $siteDay->crawlers()->delete();
+
+            foreach (array_chunk($figures->crawlers, 200) as $chunk) {
+                SiteDayCrawler::query()->insert(array_map(fn (array $crawler) => [
+                    'site_day_id' => $siteDay->id,
+                    ...Arr::except($crawler, ['last_seen']),
+                    'times' => json_encode($crawler['times']),
+                    'last_seen_at' => CarbonImmutable::createFromTimestamp($crawler['last_seen']),
+                ], $chunk));
+            }
 
             return $siteDay;
         });
@@ -208,7 +254,7 @@ class SiteDay extends Model
             }
         }
 
-        if ($age < (int) config('analytics.returning_days')) {
+        if ($age < (int) config('analytics.visitors_kept_days')) {
             $rows = array_map(
                 fn (string $visitor, array $seen) => ['site_day_id' => $siteDay->id, 'visitor' => $visitor, ...$seen],
                 array_keys($figures->visitors),
@@ -218,6 +264,75 @@ class SiteDay extends Model
             foreach (array_chunk($rows, 500) as $chunk) {
                 SiteVisitorDay::query()->insert($chunk);
             }
+        }
+    }
+
+    /**
+     * Keep the day's security figures for good, and its suspects' and
+     * attackers' addresses only when the day is recent enough to keep them.
+     */
+    private static function storeSecurity(self $siteDay, DayFigures $figures): void
+    {
+        $siteDay->security()->delete();
+        $siteDay->suspects()->delete();
+        $siteDay->attacks()->delete();
+
+        if ($figures->security === []) {
+            return;
+        }
+
+        $siteDay->security()->create(Arr::only($figures->security, ['figures', 'hosts', 'exposures']));
+
+        $age = (int) CarbonImmutable::parse($siteDay->day->toDateString())->diffInDays(now($siteDay->timezone)->toDateString());
+
+        if ($age >= (int) config('analytics.security.kept_days')) {
+            return;
+        }
+
+        foreach ($figures->security['suspects'] as $suspect) {
+            $siteDay->suspects()->create([...$suspect, 'first_seen_at' => CarbonImmutable::createFromTimestamp($suspect['first_seen_at'])]);
+        }
+
+        foreach ($figures->security['episodes'] as $episode) {
+            $siteDay->attacks()->create([
+                'kind' => $episode['kind'],
+                'address' => $episode['address'],
+                'started_at' => CarbonImmutable::createFromTimestamp($episode['from']),
+                'ended_at' => CarbonImmutable::createFromTimestamp($episode['to']),
+                'requests' => $episode['requests'],
+                'paths' => $episode['paths'],
+                'answered' => $episode['answered'],
+            ]);
+        }
+    }
+
+    /**
+     * Keep each page's first day read by a person and first day fetched by
+     * Google, the earliest seen whatever order days are counted in.
+     */
+    private static function rememberPages(Site $site, string $day, DayFigures $figures): void
+    {
+        foreach (array_chunk($figures->pages, 500, true) as $chunk) {
+            $known = $site->pages()->whereIn('path', array_map('strval', array_keys($chunk)))->get()->keyBy('path');
+            $rows = [];
+
+            foreach ($chunk as $path => $seen) {
+                $page = $known[(string) $path] ?? null;
+                $earliest = fn (?CarbonImmutable $kept, bool $now) => match (true) {
+                    ! $now => $kept?->toDateString(),
+                    $kept === null => $day,
+                    default => min($kept->toDateString(), $day),
+                };
+
+                $rows[] = [
+                    'site_id' => $site->id,
+                    'path' => substr((string) $path, 0, 255),
+                    'first_read_on' => $earliest($page?->first_read_on, $seen['read']),
+                    'first_google_on' => $earliest($page?->first_google_on, $seen['google']),
+                ];
+            }
+
+            SitePage::query()->upsert($rows, ['site_id', 'path'], ['first_read_on', 'first_google_on']);
         }
     }
 

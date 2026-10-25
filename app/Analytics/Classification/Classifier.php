@@ -2,6 +2,7 @@
 
 namespace App\Analytics\Classification;
 
+use App\Analytics\OwnPaths;
 use App\Analytics\Patterns;
 use App\Analytics\Sources;
 use App\Enums\EngineTier;
@@ -12,7 +13,8 @@ use App\Ingest\LogHit;
  * Files every request in exactly one of the five groups, in this order
  * (Skald's CLASSIFICATION.md):
  *
- *  0. a probe path or query is noted, not yet decisive
+ *  0. a probe path or query is noted, not yet decisive (never under one of
+ *     the site's own paths: OwnPaths)
  *  3. an assistant fetching for a live question       -> AI assistants, asked
  *  4. an assistant crawling to train or index          -> AI assistants, training
  *  5. a link preview                                   -> bots, "link preview: <app>"
@@ -27,15 +29,15 @@ use App\Ingest\LogHit;
  */
 final readonly class Classifier
 {
-    public function __construct(private VisitEvidence $evidence) {}
+    public function __construct(private VisitEvidence $evidence, private OwnPaths $ownPaths = new OwnPaths) {}
 
     public function classify(LogHit $hit): Verdict
     {
         $agent = $hit->userAgent;
         $path = $hit->path();
-        $probe = preg_match(Patterns::SECRET_PROBE, $path) === 1
+        $probe = ! $this->ownPaths->matches($path) && (preg_match(Patterns::SECRET_PROBE, $path) === 1
             || preg_match(Patterns::SERVED_PROBE, $path) === 1
-            || preg_match(Patterns::PROBE_QUERY, $hit->url) === 1;
+            || preg_match(Patterns::PROBE_QUERY, $hit->url) === 1);
 
         if (preg_match(Patterns::AI_ASKED, $agent, $name) === 1) {
             return new Verdict(TrafficGroup::AnswerEngines, $name[0], EngineTier::Asked, $probe);

@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * A reader seen on one day, by a keyed hash only, with their visits that
  * day and where the first came from. Kept analytics.returning_days.
  */
-#[Fillable(['visitor', 'visits', 'source'])]
+#[Fillable(['visitor', 'visits', 'views', 'source'])]
 #[WithoutTimestamps]
 class SiteVisitorDay extends Model
 {

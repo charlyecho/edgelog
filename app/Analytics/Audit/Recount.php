@@ -29,7 +29,19 @@ final class Recount
     private const array GROUPS = ['people', 'answer_engines', 'search_engines', 'bots', 'ours'];
 
     /**
+     * The site's paths that are not pages, as one pattern of its own.
+     */
+    private readonly ?string $notPagesPattern;
+
+    /**
+     * The paths the site really has that scanners ask for too: never a probe.
+     */
+    private readonly ?string $ownPathsPattern;
+
+    /**
      * @param  list<string>  $ownHosts
+     * @param  list<string>  $notPages  the site's patterns, data like the name lists
+     * @param  list<string>  $ownPaths  the same, for its own paths
      */
     public function __construct(
         private readonly string $folder,
@@ -40,7 +52,33 @@ final class Recount
         private readonly int $gap = 1800,
         private readonly int $tooFastPages = 6,
         private readonly int $tooFastSeconds = 2,
-    ) {}
+        array $notPages = [],
+        array $ownPaths = [],
+    ) {
+        $this->notPagesPattern = self::globs($notPages);
+        $this->ownPathsPattern = self::globs($ownPaths);
+    }
+
+    /**
+     * One pattern for a list of paths where a star stands for anything, or null for none.
+     *
+     * @param  list<string>  $globs
+     */
+    private static function globs(array $globs): ?string
+    {
+        $alternatives = [];
+
+        foreach ($globs as $glob) {
+            $alternatives[] = implode('.*', array_map(fn (string $part) => preg_quote($part, '#'), explode('*', $glob)));
+        }
+
+        return $alternatives === [] ? null : '#^(?:'.implode('|', $alternatives).')$#';
+    }
+
+    private function isOwnPath(string $path): bool
+    {
+        return $this->ownPathsPattern !== null && preg_match($this->ownPathsPattern, $path) === 1;
+    }
 
     /**
      * The day's core figures, keyed as DayFigures::core() keys them.
@@ -331,6 +369,10 @@ final class Recount
             return false;
         }
 
+        if ($this->notPagesPattern !== null && preg_match($this->notPagesPattern, $line['p'])) {
+            return false;
+        }
+
         if (preg_match(Patterns::RSC_PAYLOAD, $line['u'])) {
             return $line['m'] === 'GET' && preg_match(Patterns::RSC_QUERY, $line['u'])
                 && ($line['pf'] === '-' || $line['pf'] === '');
@@ -349,7 +391,7 @@ final class Recount
     private function judge(array $line, array $scanners, array $flagged): array
     {
         $ua = $line['ua'];
-        $probe = (bool) (preg_match(Patterns::SECRET_PROBE, $line['p']) || preg_match(Patterns::SERVED_PROBE, $line['p'])
+        $probe = ! $this->isOwnPath($line['p']) && (preg_match(Patterns::SECRET_PROBE, $line['p']) || preg_match(Patterns::SERVED_PROBE, $line['p'])
             || preg_match(Patterns::PROBE_QUERY, $line['u']));
         $id = $line['a']."\n".$ua;
 
@@ -401,7 +443,7 @@ final class Recount
         $found = [];
 
         foreach ($lines as $line) {
-            if (preg_match(Patterns::SECRET_PROBE, $line['p']) || preg_match(Patterns::PROBE_QUERY, $line['u'])) {
+            if (! $this->isOwnPath($line['p']) && (preg_match(Patterns::SECRET_PROBE, $line['p']) || preg_match(Patterns::PROBE_QUERY, $line['u']))) {
                 $found[$line['a']."\n".$line['ua']] = true;
             }
         }

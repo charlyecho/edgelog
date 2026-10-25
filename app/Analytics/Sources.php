@@ -19,6 +19,31 @@ final readonly class Sources
     /**
      * @param  list<string>  $ownHosts  the site's own host names, lower case
      */
+    /**
+     * Social networks by their hosts and their apps' package names.
+     *
+     * @var array<string, string>
+     */
+    private const array NETWORKS = [
+        '~(?:^|\.)(?:facebook\.com|fb\.com)$|^com\.facebook~' => 'Facebook',
+        '~(?:^|\.)instagram\.com$|^com\.instagram~' => 'Instagram',
+        '~(?:^|\.)(?:linkedin\.com|lnkd\.in)$|^com\.linkedin~' => 'LinkedIn',
+        '~(?:^|\.)(?:t\.co|twitter\.com|x\.com)$|^com\.twitter~' => 'X',
+        '~(?:^|\.)reddit\.com$|^com\.reddit~' => 'Reddit',
+        '~(?:^|\.)(?:youtube\.com|youtu\.be)$|^com\.google\.android\.youtube~' => 'YouTube',
+        '~(?:^|\.)pinterest\.[a-z.]+$~' => 'Pinterest',
+        '~(?:^|\.)tiktok\.com$~' => 'TikTok',
+        '~(?:^|\.)threads\.net$~' => 'Threads',
+        '~(?:^|\.)ycombinator\.com$~' => 'Hacker News',
+        '~(?:^|\.)quora\.com$~' => 'Quora',
+        '~(?:^|\.)t\.me$|^org\.telegram~' => 'Telegram',
+        '~(?:^|\.)whatsapp\.com$|^com\.whatsapp~' => 'WhatsApp',
+        '~(?:^|\.)slack\.com$|^com\.slack~' => 'Slack',
+        '~(?:^|\.)discord\.com$~' => 'Discord',
+        '~(?:^|\.)bsky\.app$~' => 'Bluesky',
+        '~(?:^|\.)mastodon\.social$~' => 'Mastodon',
+    ];
+
     public function __construct(private array $ownHosts) {}
 
     /**
@@ -134,6 +159,21 @@ final readonly class Sources
             $this->isOwn($host) => self::THIS_SITE,
             default => substr($host, 0, 60),
         };
+    }
+
+    /**
+     * The social network a referring host belongs to, by the name people
+     * know it by, or the host itself when it is none of the known ones.
+     */
+    public static function network(string $host): string
+    {
+        foreach (self::NETWORKS as $pattern => $name) {
+            if (preg_match($pattern, $host) === 1) {
+                return $name;
+            }
+        }
+
+        return $host;
     }
 
     /**

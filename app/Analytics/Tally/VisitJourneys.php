@@ -8,6 +8,7 @@ use App\Analytics\UserAgentLabels;
 use App\Analytics\VisitorKey;
 use App\Enums\CountKind;
 use App\Ingest\LogHit;
+use Carbon\CarbonImmutable;
 
 /**
  * People's visits, one anonymous journey each: when it started, where it
@@ -34,19 +35,32 @@ final class VisitJourneys
     public const string ARROW = ' → ';
 
     /**
-     * @var array<int, array{start: int, end: int, pages: int, trail: list<string>, last: ?string, steps: list<string>, not_found: bool, posted: bool, signed_in: bool, labels: ?array<string, string>, visitor: ?string}>
+     * What engagement is split by: every visit has a source, a device and a
+     * referrer; only a tagged visit has utm_ tags.
+     */
+    public const array DIMENSIONS = ['source', 'device', 'referrer', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'];
+
+    /**
+     * The dimensions every visit has one value of: each adds up to the visits.
+     */
+    public const array WHOLE_DIMENSIONS = ['source', 'device', 'referrer'];
+
+    /**
+     * @var array<int, array{start: int, end: int, pages: int, trail: list<string>, read: array<string, true>, last: ?string, steps: list<string>, not_found: bool, posted: bool, signed_in: bool, labels: ?array<string, mixed>, visitor: ?string}>
      */
     private array $visits = [];
+
+    public function __construct(private readonly string $timezone = 'UTC') {}
 
     /**
      * A person's request, added to its visit (VisitCounter's number).
      *
-     * @param  ?array{country: string, city: string, source: string, via: string, campaign: string}  $origin  where the visit came from, on its first page
+     * @param  ?array{country: string, city: string, region: string, source: string, via: string, campaign: string, dims: array<string, string>}  $origin  where the visit came from, on its first page
      */
     public function add(int $visit, LogHit $hit, ?string $page, ?array $origin = null): void
     {
         $time = $hit->when->getTimestamp();
-        $journey = $this->visits[$visit] ?? ['start' => $time, 'end' => $time, 'pages' => 0, 'trail' => [], 'last' => null,
+        $journey = $this->visits[$visit] ?? ['start' => $time, 'end' => $time, 'pages' => 0, 'trail' => [], 'read' => [], 'last' => null,
             'steps' => [], 'not_found' => false, 'posted' => false, 'signed_in' => false, 'labels' => null, 'visitor' => null];
 
         $journey['start'] = min($journey['start'], $time);
@@ -62,6 +76,7 @@ final class VisitJourneys
 
             $journey['pages']++;
             $journey['last'] = $page;
+            $journey['read'][$page] = true;
 
             if (count($journey['trail']) < self::TRAIL_KEEP) {
                 $journey['trail'][] = $page;
@@ -92,12 +107,19 @@ final class VisitJourneys
 
         foreach ($readers as $journey) {
             $labels = $journey['labels'];
+            $dimensions = ['source' => $labels['source'], 'device' => $labels['device'], ...$labels['dims']];
+            unset($labels['dims'], $labels['region']);
             $seconds = $journey['end'] - $journey['start'];
             $bucket = (string) self::secondsBucket($seconds);
 
             $figures->count(CountKind::VisitPages, (string) $journey['pages']);
             $figures->count(CountKind::VisitSeconds, $bucket);
             $figures->count(CountKind::VisitExit, (string) $journey['last']);
+            $figures->count(CountKind::VisitHour, (string) (int) CarbonImmutable::createFromTimestamp($journey['start'], $this->timezone)->format('G'));
+
+            foreach (array_keys($journey['read']) as $page) {
+                $figures->count(CountKind::PeoplePageVisitors, (string) $page);
+            }
 
             foreach ($journey['steps'] as $step) {
                 $figures->count(CountKind::VisitStep, $step);
@@ -109,17 +131,24 @@ final class VisitJourneys
                 }
             }
 
-            foreach (['source', 'device'] as $dimension) {
-                $row = $figures->engagement[$dimension][$labels[$dimension]] ?? ['visits' => 0, 'views' => 0, 'one_page' => 0, 'seconds' => []];
+            foreach ($dimensions as $dimension => $name) {
+                if ($name === '') {
+                    continue;
+                }
+
+                $row = $figures->engagement[$dimension][$name] ?? ['visits' => 0, 'views' => 0, 'one_page' => 0, 'not_found' => 0, 'posted' => 0, 'seconds' => []];
                 $row['visits']++;
                 $row['views'] += $journey['pages'];
                 $row['one_page'] += $journey['pages'] === 1 ? 1 : 0;
+                $row['not_found'] += $journey['not_found'] ? 1 : 0;
+                $row['posted'] += $journey['posted'] ? 1 : 0;
                 $row['seconds'][$bucket] = ($row['seconds'][$bucket] ?? 0) + 1;
-                $figures->engagement[$dimension][$labels[$dimension]] = $row;
+                $figures->engagement[$dimension][$name] = $row;
             }
 
-            $visitor = $figures->visitors[$journey['visitor']] ?? ['visits' => 0, 'source' => $labels['source']];
+            $visitor = $figures->visitors[$journey['visitor']] ?? ['visits' => 0, 'views' => 0, 'source' => $labels['source']];
             $visitor['visits']++;
+            $visitor['views'] += $journey['pages'];
             $figures->visitors[$journey['visitor']] = $visitor;
 
             $figures->journeys[] = [

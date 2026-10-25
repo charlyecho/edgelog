@@ -2,6 +2,8 @@
 
 namespace App\Analytics\Classification;
 
+use App\Analytics\NotPages;
+use App\Analytics\OwnPaths;
 use App\Analytics\PageRule;
 use App\Analytics\Patterns;
 use App\Ingest\LogHit;
@@ -75,6 +77,8 @@ final class VisitEvidence
         private readonly int $gapSeconds = 1800,
         private readonly int $tooFastPages = 6,
         private readonly int $tooFastSeconds = 2,
+        private readonly NotPages $notPages = new NotPages,
+        private readonly OwnPaths $ownPaths = new OwnPaths,
     ) {}
 
     public static function key(LogHit $hit): string
@@ -90,7 +94,7 @@ final class VisitEvidence
         $key = self::key($hit);
         $path = $hit->path();
 
-        if (! isset($this->scanners[$key])
+        if (! isset($this->scanners[$key]) && ! $this->ownPaths->matches($path)
             && (preg_match(Patterns::SECRET_PROBE, $path) === 1 || preg_match(Patterns::PROBE_QUERY, $hit->url) === 1)) {
             $this->scanners[$key] = true;
         }
@@ -101,7 +105,7 @@ final class VisitEvidence
 
         $flags = 0;
 
-        if (PageRule::isPage($hit)) {
+        if (PageRule::isPage($hit, $this->notPages)) {
             $flags |= self::PAGE;
         }
 

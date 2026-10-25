@@ -50,6 +50,8 @@ class AuditSiteDay implements ShouldBeUnique, ShouldQueue
             (int) config('analytics.visit_gap_minutes') * 60,
             (int) config('analytics.too_fast_pages'),
             (int) config('analytics.too_fast_seconds'),
+            array_values($this->site->not_pages ?? []),
+            array_values($this->site->own_paths ?? []),
         );
 
         $window = new DayWindow($this->day, $siteDay->timezone);

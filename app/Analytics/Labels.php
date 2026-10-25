@@ -88,6 +88,27 @@ final class Labels
     /**
      * Determine if the assistant's agent fetches for a live question.
      */
+    /**
+     * An assistant by the name people know it by, from the domain its visitors come from.
+     */
+    public static function assistant(string $domain): string
+    {
+        return match ($domain) {
+            'chatgpt.com' => 'ChatGPT',
+            'claude.ai' => 'Claude',
+            'perplexity.ai' => 'Perplexity',
+            'gemini.google.com' => 'Gemini',
+            'copilot.microsoft.com' => 'Copilot',
+            'mistral.ai' => 'Mistral',
+            'meta.ai' => 'Meta AI',
+            'you.com' => 'You.com',
+            'phind.com' => 'Phind',
+            'poe.com' => 'Poe',
+            'amazon.com' => 'Alexa',
+            default => $domain,
+        };
+    }
+
     public static function isUserFetcher(string $name): bool
     {
         return preg_match(Patterns::AI_ASKED, $name) === 1;

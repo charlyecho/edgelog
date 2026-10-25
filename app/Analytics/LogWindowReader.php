@@ -124,6 +124,29 @@ final class LogWindowReader
     }
 
     /**
+     * The window's hits whose line holds the given text, in file order:
+     * only those lines are parsed, so one address is found fast in a large log.
+     *
+     * @return Generator<int, LogHit>
+     */
+    public function hitsContaining(string $needle): Generator
+    {
+        foreach ($this->files() as $file) {
+            foreach ($this->linesOf($file) as $line) {
+                if (! str_contains($line, $needle)) {
+                    continue;
+                }
+
+                $hit = $this->parser->parse($line);
+
+                if ($hit !== null && $this->window->contains($hit->when)) {
+                    yield $hit;
+                }
+            }
+        }
+    }
+
+    /**
      * The site's files that may hold lines of the window, oldest first.
      *
      * @return list<string>

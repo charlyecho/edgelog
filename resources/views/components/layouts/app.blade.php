@@ -77,6 +77,9 @@
                     @if ($railSite)
                         <x-rail-link :href="route('teams.sites.show', [$railTeam, $railSite])" icon="chart" :active="request()->routeIs('teams.sites.show', 'teams.sites.realtime')">{{ __('Overview') }}</x-rail-link>
                         <x-rail-link :href="route('teams.sites.traffic.visitors', [$railTeam, $railSite])" icon="route" :active="request()->routeIs('teams.sites.traffic.*')">{{ __('Traffic') }}</x-rail-link>
+                        <x-rail-link :href="route('teams.sites.sales.users', [$railTeam, $railSite])" icon="users" :active="request()->routeIs('teams.sites.sales.*')">{{ __('Leads & sales') }}</x-rail-link>
+                        <x-rail-link :href="route('teams.sites.ai.assistants', [$railTeam, $railSite])" icon="sparkle" :active="request()->routeIs('teams.sites.ai.*')">{{ __('AI & bots') }}</x-rail-link>
+                        <x-rail-link :href="route('teams.sites.security.exposed', [$railTeam, $railSite])" icon="shield" :active="request()->routeIs('teams.sites.security.*')">{{ __('Security') }}</x-rail-link>
                         @can('update', $railSite)
                             <x-rail-link :href="route('teams.sites.edit', [$railTeam, $railSite])" icon="sliders" :active="request()->routeIs('teams.sites.edit')">{{ __('Site settings') }}</x-rail-link>
                         @endcan
@@ -135,6 +138,20 @@
                 {{ $slot }}
             </main>
         </div>
+    </div>
+
+    {{-- The side panel a [data-drawer] link opens: the page it links to, in panel form. --}}
+    <div class="fixed inset-0 z-40 hidden" data-drawer-root aria-hidden="true">
+        <div class="absolute inset-0 bg-ink/30" data-drawer-close></div>
+        <aside class="absolute inset-y-0 right-0 flex w-full max-w-2xl flex-col border-l border-rule bg-page shadow-card" role="dialog" aria-modal="true" aria-label="{{ __('Details') }}">
+            <div class="flex items-center justify-between border-b border-rule px-4 py-3">
+                <a href="#" class="text-[13px] text-ink-2 underline hover:text-ink" data-drawer-page target="_blank" rel="noopener">{{ __('Open as a page') }}</a>
+                <button type="button" class="grid size-8 cursor-pointer place-items-center rounded-lg text-ink-2 hover:bg-sunk hover:text-ink" data-drawer-close>
+                    <span aria-hidden="true">✕</span><span class="sr-only">{{ __('Close') }}</span>
+                </button>
+            </div>
+            <div class="flex-1 overflow-y-auto p-4" data-drawer-body></div>
+        </aside>
     </div>
 </body>
 </html>

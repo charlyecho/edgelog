@@ -44,8 +44,38 @@ return [
     // within this window is returning.
     'returning_days' => (int) env('ANALYTICS_RETURNING_DAYS', 30),
 
+    // Days those hashes are kept, for retention: whether the visitors first
+    // seen in a week came back in the weeks after.
+    'visitors_kept_days' => (int) env('ANALYTICS_VISITORS_KEPT_DAYS', 400),
+
     // The secret of those hashes. Empty: one drawn from APP_KEY.
     'visitor_key' => env('ANALYTICS_VISITOR_KEY', ''),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Security
+    |--------------------------------------------------------------------------
+    |
+    | A 2xx answer to a probe is the host's harmless fallback page when its
+    | size is within `tolerance` bytes of a size the host gave at least
+    | `shell_paths` probe paths that day. Login hammering: `login_posts` POSTs
+    | to a login or form path from one address within `login_seconds`. A
+    | burst: `burst_requests` requests from one address within
+    | `burst_seconds`. The addresses of scanners and attackers are kept
+    | `security_kept_days`, for the block list; the day's counts stay.
+    |
+    */
+
+    'security' => [
+        'shell_paths' => 3,
+        'tolerance' => 16,
+        'login_posts' => 20,
+        'login_seconds' => 300,
+        'burst_requests' => 300,
+        'burst_seconds' => 60,
+        'large_post_bytes' => 1_000_000,
+        'kept_days' => (int) env('ANALYTICS_SECURITY_KEPT_DAYS', 90),
+    ],
 
     /*
     |--------------------------------------------------------------------------

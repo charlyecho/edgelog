@@ -4,9 +4,14 @@ namespace App\Console\Commands;
 
 use App\Analytics\DayWindow;
 use App\Jobs\AuditSiteDay;
+use App\Jobs\CheckStack;
 use App\Jobs\CollectSiteDay;
+use App\Jobs\FetchRobotsTxt;
+use App\Jobs\FetchSitemap;
 use App\Models\Site;
 use App\Models\SiteDay;
+use App\Models\SiteDayAttack;
+use App\Models\SiteDaySuspect;
 use App\Models\SiteDayUser;
 use App\Models\SiteUser;
 use App\Models\SiteVisit;
@@ -41,6 +46,8 @@ class RunDailyCommand extends Command
                 return;
             }
 
+            Bus::chain([new FetchRobotsTxt($site), new FetchSitemap($site), new CheckStack($site)])->dispatch();
+
             Bus::chain([new CollectSiteDay($site, $window->day), new AuditSiteDay($site, $window->day)])->dispatch();
             $queued++;
         });
@@ -65,8 +72,9 @@ class RunDailyCommand extends Command
     }
 
     /**
-     * Visits are kept journey_days and visitors' hashes returning_days, no
-     * longer, counted from today: the days' counts stay.
+     * Visits are kept journey_days, visitors' hashes visitors_kept_days and
+     * the addresses of scanners and attackers security.kept_days, no longer,
+     * counted from today: the days' counts stay.
      */
     private function forgetOldVisits(): void
     {
@@ -75,6 +83,8 @@ class RunDailyCommand extends Command
             ->select('id');
 
         SiteVisit::query()->whereIn('site_day_id', $olderThan('journey_days'))->delete();
-        SiteVisitorDay::query()->whereIn('site_day_id', $olderThan('returning_days'))->delete();
+        SiteVisitorDay::query()->whereIn('site_day_id', $olderThan('visitors_kept_days'))->delete();
+        SiteDaySuspect::query()->whereIn('site_day_id', $olderThan('security.kept_days'))->delete();
+        SiteDayAttack::query()->whereIn('site_day_id', $olderThan('security.kept_days'))->delete();
     }
 }

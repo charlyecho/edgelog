@@ -33,6 +33,36 @@
             </x-slot:after>
         </x-card>
 
+        <x-card :title="__('Paths')" :description="__('Two lists that change how requests are counted: one path per line, * stands for any characters.')">
+            <form method="POST" action="{{ route('teams.sites.paths.update', [$team, $site]) }}" class="grid gap-4">
+                @csrf
+                @method('PUT')
+                @foreach ([
+                    'not_pages' => [__('Paths that are not pages'), __('Requests your own pages make while they are read, such as a dashboard loading its data. A request to one is part of its visit (it keeps it going and counts in its length) but never a page: not in pages read, the visitor flow, where visits ended or the steps between pages. Requests under /api/ are never pages already.'), '/user/home_ajax/*'],
+                    'own_paths' => [__('Paths the site really has'), __('Paths scanners ask for that your site really has, such as its own /admin/ or an old site\'s /wp-content/uploads/. A request under one is never a scanner probe: the people who use them stay visitors, and what they were answered is never taken for an exposure.'), '/admin/*'],
+                ] as $name => [$label, $hint, $placeholder])
+                    <label class="grid gap-1.5 text-[13px] font-medium text-ink-2">
+                        <span class="font-semibold text-ink">{{ $label }}</span>
+                        <span class="font-normal text-ink-3">{{ $hint }}</span>
+                        <textarea name="{{ $name }}" rows="3" placeholder="{{ $placeholder }}" @error($name) aria-invalid="true" @enderror @class([
+                            'w-full rounded-[9px] border bg-surface px-3 py-2 font-mono text-[13px] font-normal text-ink placeholder:text-ink-3 hover:border-ink-3',
+                            'border-bad' => $errors->has($name),
+                            'border-rule' => ! $errors->has($name),
+                        ])>{{ old($name, implode("\n", $site->{$name} ?? [])) }}</textarea>
+                        @error($name)
+                            <span class="text-[13px] font-normal text-bad">{{ $message }}</span>
+                        @enderror
+                    </label>
+                @endforeach
+                <label class="flex items-center gap-2 text-[13px] text-ink-2">
+                    <input type="hidden" name="recount" value="0">
+                    <input type="checkbox" name="recount" value="1" class="size-4" @checked(old('recount'))>
+                    {{ __('Count the last :count days again with these paths (older days keep their figures)', ['count' => \App\Http\Controllers\SitePathsController::RECOUNT_DAYS]) }}
+                </label>
+                <div><x-button variant="secondary">{{ __('Save') }}</x-button></div>
+            </form>
+        </x-card>
+
         <x-card :title="__('Token')" :description="__('The site sends its data with this token. Generating a new one stops the previous one at once.')">
             <div class="flex flex-wrap items-center justify-between gap-3">
                 <p class="text-ink-2">{{ __('Generated :when.', ['when' => $site->token_generated_at->diffForHumans()]) }}</p>

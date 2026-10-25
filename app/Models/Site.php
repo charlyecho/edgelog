@@ -15,13 +15,45 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Str;
 
-#[Fillable(['name', 'url', 'log_format', 'timezone'])]
+#[Fillable(['name', 'url', 'log_format', 'timezone', 'not_pages', 'own_paths'])]
 #[Hidden(['token_hash'])]
 #[RouteKey('uuid')]
 class Site extends Model
 {
     /** @use HasFactory<SiteFactory> */
     use HasFactory, HasUuids;
+
+    /**
+     * @return HasOne<SiteRobots, $this>
+     */
+    public function robots(): HasOne
+    {
+        return $this->hasOne(SiteRobots::class);
+    }
+
+    /**
+     * @return HasOne<SiteStack, $this>
+     */
+    public function stack(): HasOne
+    {
+        return $this->hasOne(SiteStack::class);
+    }
+
+    /**
+     * @return HasOne<SiteSitemap, $this>
+     */
+    public function sitemap(): HasOne
+    {
+        return $this->hasOne(SiteSitemap::class);
+    }
+
+    /**
+     * @return HasMany<SitePage, $this>
+     */
+    public function pages(): HasMany
+    {
+        return $this->hasMany(SitePage::class);
+    }
 
     /**
      * The prefix every site token starts with.
@@ -58,6 +90,8 @@ class Site extends Model
         return [
             'token_generated_at' => 'datetime',
             'log_format' => LogFormat::class,
+            'not_pages' => 'array',
+            'own_paths' => 'array',
         ];
     }
 

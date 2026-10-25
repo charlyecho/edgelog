@@ -116,3 +116,73 @@ document.querySelectorAll('[data-live-refresh]').forEach((bar) => {
 
     apply(read());
 });
+
+/**
+ * A "Copy" button copies the text of the element its data-copy names, and
+ * says so for a moment.
+ */
+document.querySelectorAll('[data-copy]').forEach((button) => {
+    button.addEventListener('click', async () => {
+        const source = document.querySelector(button.dataset.copy);
+
+        if (!source || !navigator.clipboard) {
+            return;
+        }
+
+        await navigator.clipboard.writeText(source.textContent);
+        const label = button.textContent;
+        button.textContent = button.dataset.copied || '✓';
+        setTimeout(() => {
+            button.textContent = label;
+        }, 1500);
+    });
+});
+
+/**
+ * A [data-drawer] link opens its page in the side panel, asked for in panel
+ * form; Ctrl or Cmd and a middle click still open it as a page.
+ */
+const drawer = document.querySelector('[data-drawer-root]');
+
+if (drawer) {
+    const body = drawer.querySelector('[data-drawer-body]');
+    const page = drawer.querySelector('[data-drawer-page]');
+    const close = () => {
+        drawer.classList.add('hidden');
+        drawer.setAttribute('aria-hidden', 'true');
+        body.replaceChildren();
+    };
+
+    document.addEventListener('click', async (event) => {
+        const link = event.target.closest('a[data-drawer]');
+
+        if (link) {
+            if (event.ctrlKey || event.metaKey || event.shiftKey || event.button !== 0) {
+                return;
+            }
+
+            event.preventDefault();
+            const url = new URL(link.href);
+            page.href = url.toString();
+            url.searchParams.set('panel', '1');
+            body.textContent = '…';
+            drawer.classList.remove('hidden');
+            drawer.setAttribute('aria-hidden', 'false');
+
+            const response = await fetch(url, { headers: { Accept: 'text/html' } });
+            body.innerHTML = response.ok ? await response.text() : `<p class="text-bad">${response.status}</p>`;
+
+            return;
+        }
+
+        if (event.target.closest('[data-drawer-close]')) {
+            close();
+        }
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && !drawer.classList.contains('hidden')) {
+            close();
+        }
+    });
+}

@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * A day's visits of one source type or one device: how many, the pages
  * they read, those that read one page, and their lengths by bucket.
  */
-#[Fillable(['dimension', 'name', 'visits', 'views', 'one_page', 'seconds'])]
+#[Fillable(['dimension', 'name', 'visits', 'views', 'one_page', 'seconds', 'not_found', 'posted'])]
 #[WithoutTimestamps]
 class SiteDayEngagement extends Model
 {

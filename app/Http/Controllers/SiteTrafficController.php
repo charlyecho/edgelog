@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Analytics\Retention;
 use App\Analytics\SitePeriod;
 use App\Analytics\VisitorFlow;
+use App\Enums\CountKind;
 use App\Enums\SourceType;
 use App\Models\Site;
 use App\Models\SiteVisit;
@@ -66,6 +68,100 @@ class SiteTrafficController extends Controller
             'visits' => $listed->limit($showAll ? self::VISITS_MAX : self::VISITS_SHOWN)->get(),
             'matching' => $matching,
             'keptDays' => $period->daysWithVisits(),
+        ]);
+    }
+
+    /**
+     * Show where visitors came from: by source type, social network,
+     * referring site and campaign, then how each referrer's and each
+     * utm_ tag's visits went.
+     */
+    public function sources(Request $request, Team $team, Site $site): View
+    {
+        return $this->tab($request, $team, $site, 'sources', fn (SitePeriod $period) => [
+            'list' => in_array($request->query('list'), ['type', 'social', 'referrer', 'campaign'], true) ? $request->query('list') : 'type',
+            'utm' => in_array($request->query('utm'), ['source', 'medium', 'campaign', 'term', 'content'], true) ? $request->query('utm') : 'source',
+        ]);
+    }
+
+    /**
+     * Show the site's pages: when each was first seen, how each did in the
+     * period, where visits started and what people read.
+     */
+    public function pages(Request $request, Team $team, Site $site): View
+    {
+        return $this->tab($request, $team, $site, 'pages', fn (SitePeriod $period) => [
+            'lastWeek' => SitePeriod::lastDays($site, 7),
+            'lastMonth' => SitePeriod::lastDays($site, 30),
+            'published' => $site->pages()->whereNotNull('first_read_on')
+                ->where(fn (Builder $query) => $query->where('first_read_on', '>=', $period->first->toDateString())
+                    ->orWhere('first_google_on', '>=', $period->first->toDateString()))
+                ->get()
+                ->filter(fn ($page) => $page->publishedOn()?->betweenIncluded($period->first, $period->last))
+                ->sortBy([
+                    fn ($a, $b) => $b->publishedOn() <=> $a->publishedOn(),
+                    fn ($a, $b) => strcmp($a->path, $b->path),
+                ])
+                ->values(),
+        ]);
+    }
+
+    /**
+     * Show the visitors' devices, browsers, systems, countries and cities.
+     */
+    public function places(Request $request, Team $team, Site $site): View
+    {
+        return $this->tab($request, $team, $site, 'places');
+    }
+
+    /**
+     * Show when visitors come: each day hour by hour, and every hour together.
+     */
+    public function time(Request $request, Team $team, Site $site): View
+    {
+        return $this->tab($request, $team, $site, 'time', fn (SitePeriod $period) => [
+            'hours' => $period->dailyCounts(CountKind::VisitHour),
+        ]);
+    }
+
+    /**
+     * Show the visitors first seen in each recent week (or day) and the
+     * share back in each one after. Its own period: the bar's does not apply.
+     */
+    public function retention(Request $request, Team $team, Site $site): View
+    {
+        Gate::authorize('view', $site);
+
+        $grain = $request->query('by') === 'day' ? 'day' : 'week';
+        $readers = $request->query('back') === 'read';
+
+        return view('sites.traffic.retention', [
+            'team' => $team,
+            'site' => $site,
+            'grain' => $grain,
+            'readers' => $readers,
+            'retention' => new Retention($site, $grain, $readers),
+        ]);
+    }
+
+    /**
+     * A tab that reads the period the bar picked.
+     *
+     * @param  ?callable(SitePeriod): array<string, mixed>  $more
+     */
+    private function tab(Request $request, Team $team, Site $site, string $tab, ?callable $more = null): View
+    {
+        Gate::authorize('view', $site);
+
+        $choice = in_array($request->query('days'), SitePeriod::CHOICES, true) ? $request->query('days') : '30';
+        $period = SitePeriod::choose($site, $choice);
+
+        return view("sites.traffic.{$tab}", [
+            'team' => $team,
+            'site' => $site,
+            'choice' => $choice,
+            'period' => $period,
+            ...($more === null ? [] : $more($period)),
         ]);
     }
 

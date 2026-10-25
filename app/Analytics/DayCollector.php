@@ -4,7 +4,9 @@ namespace App\Analytics;
 
 use App\Analytics\Classification\Classifier;
 use App\Analytics\Classification\VisitEvidence;
+use App\Analytics\Crawlers\CrawlerCollector;
 use App\Analytics\Geo\Places;
+use App\Analytics\Security\SecurityCollector;
 use App\Analytics\Tally\DayTally;
 use App\Enums\ConversionAction;
 use App\Enums\CountKind;
@@ -30,12 +32,17 @@ final class DayCollector
         $hosts = SiteHosts::of($site);
         $reader = new LogWindowReader(IngestLog::for($site)->folder(), $site->log_format->parser(), $window);
 
+        $notPages = NotPages::of($site);
+        $ownPaths = OwnPaths::of($site);
+
         $evidence = new VisitEvidence(
             $hosts->hosts,
             (bool) config('analytics.require_rendering'),
             (int) config('analytics.visit_gap_minutes') * 60,
             (int) config('analytics.too_fast_pages'),
             (int) config('analytics.too_fast_seconds'),
+            $notPages,
+            $ownPaths,
         );
 
         $newest = PHP_INT_MIN;
@@ -58,14 +65,27 @@ final class DayCollector
         }
 
         $evidence->finish();
-        $classifier = new Classifier($evidence);
-        $tally = new DayTally(new Sources($hosts->hosts), (int) config('analytics.visit_gap_minutes') * 60, $this->places);
+        $classifier = new Classifier($evidence, $ownPaths);
+        $tally = new DayTally(new Sources($hosts->hosts), (int) config('analytics.visit_gap_minutes') * 60, $this->places, $notPages, $window->timezone);
+
+        $security = new SecurityCollector($hosts->hosts, config('analytics.security'));
+        $crawlers = new CrawlerCollector;
 
         foreach (TimeOrdered::of($reader->hits(), max(60, $lateness + 1)) as $hit) {
-            $hosts->covers($hit) ? $tally->add($hit, $classifier->classify($hit)) : $tally->otherHost($hit->host);
+            if ($hosts->covers($hit)) {
+                $verdict = $classifier->classify($hit);
+                $tally->add($hit, $verdict);
+                $security->add($hit, $verdict);
+                $crawlers->add($hit, $verdict);
+            } else {
+                $tally->otherHost($hit->host);
+                $security->add($hit, null);
+            }
         }
 
         $figures = $tally->finish();
+        $security->finish($figures, $this->places);
+        $crawlers->finish($figures);
         ReturningVisitors::mark($site, $window->day, $figures);
         $this->addRevenue($site, $window, $figures);
         $figures->parsed = $reader->lines;

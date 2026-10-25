@@ -25,7 +25,7 @@ final class MmdbPlaces implements Places
     private ?Reader $cities;
 
     /**
-     * @var array<string, array{0: string, 1: string}>
+     * @var array<string, array{0: string, 1: string, 2: string}>
      */
     private array $seen = [];
 
@@ -50,7 +50,7 @@ final class MmdbPlaces implements Places
 
     public function of(string $address, string $loggedCountry = ''): Place
     {
-        [$country, $city] = $this->seen[$address] ??= $this->lookUp($address);
+        [$country, $city, $region] = $this->seen[$address] ??= $this->lookUp($address);
 
         if (count($this->seen) > self::CACHE) {
             $this->seen = array_slice($this->seen, intdiv(self::CACHE, 2), null, true);
@@ -62,28 +62,29 @@ final class MmdbPlaces implements Places
             return new Place($loggedCountry);
         }
 
-        return new Place($country, $city);
+        return new Place($country, $city, $region);
     }
 
     /**
-     * @return array{0: string, 1: string}
+     * @return array{0: string, 1: string, 2: string}
      */
     private function lookUp(string $address): array
     {
         if (filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
-            return ['', ''];
+            return ['', '', ''];
         }
 
         try {
             $record = $this->cities?->get($address) ?? $this->countries?->get($address);
         } catch (Throwable) {
-            return ['', ''];
+            return ['', '', ''];
         }
 
         $country = strtoupper((string) ($record['country']['iso_code'] ?? ''));
         $city = (string) ($record['city']['names']['en'] ?? '');
+        $region = (string) ($record['subdivisions'][0]['names']['en'] ?? '');
 
-        return [preg_match('/^[A-Z]{2}$/', $country) === 1 ? $country : '', substr($city, 0, 80)];
+        return [preg_match('/^[A-Z]{2}$/', $country) === 1 ? $country : '', substr($city, 0, 80), $city === '' ? '' : substr($region, 0, 80)];
     }
 
     private static function open(?string $file): ?Reader

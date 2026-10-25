@@ -227,6 +227,27 @@ final class SitePeriod
     }
 
     /**
+     * A breakdown of each verified day: [day][name] => count.
+     *
+     * @return array<string, array<string, int>>
+     */
+    public function dailyCounts(CountKind $kind): array
+    {
+        $days = $this->verified()->mapWithKeys(fn (SiteDay $day, string $date) => [$day->id => $date]);
+        $daily = [];
+
+        SiteDayCount::query()
+            ->whereIn('site_day_id', $days->keys())
+            ->where('kind', $kind)
+            ->get(['site_day_id', 'name', 'count'])
+            ->each(function (SiteDayCount $row) use ($days, &$daily) {
+                $daily[$days[$row->site_day_id]][$row->name] = (int) $row->count;
+            });
+
+        return $daily;
+    }
+
+    /**
      * Determine if every verified day recorded its visits (days counted
      * before visits were kept have none): a period's median from some of
      * its days is not the period's median.
@@ -248,7 +269,7 @@ final class SitePeriod
      * The visits of the verified days by source type or by device, summed,
      * most visits first.
      *
-     * @return array<string, array{visits: int, views: int, one_page: int, seconds: array<string, int>}>
+     * @return array<string, array{visits: int, views: int, one_page: int, not_found: int, posted: int, seconds: array<string, int>}>
      */
     public function engagement(string $dimension): array
     {
@@ -259,10 +280,12 @@ final class SitePeriod
             ->where('dimension', $dimension)
             ->get()
             ->each(function (SiteDayEngagement $engagement) use (&$rows) {
-                $row = $rows[$engagement->name] ?? ['visits' => 0, 'views' => 0, 'one_page' => 0, 'seconds' => []];
+                $row = $rows[$engagement->name] ?? ['visits' => 0, 'views' => 0, 'one_page' => 0, 'not_found' => 0, 'posted' => 0, 'seconds' => []];
                 $row['visits'] += $engagement->visits;
                 $row['views'] += $engagement->views;
                 $row['one_page'] += $engagement->one_page;
+                $row['not_found'] += $engagement->not_found;
+                $row['posted'] += $engagement->posted;
 
                 foreach ($engagement->seconds as $bucket => $visits) {
                     $row['seconds'][$bucket] = ($row['seconds'][$bucket] ?? 0) + $visits;

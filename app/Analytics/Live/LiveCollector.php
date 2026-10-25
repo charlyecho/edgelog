@@ -7,6 +7,8 @@ use App\Analytics\Classification\VisitEvidence;
 use App\Analytics\DayWindow;
 use App\Analytics\Geo\Places;
 use App\Analytics\LogWindowReader;
+use App\Analytics\NotPages;
+use App\Analytics\OwnPaths;
 use App\Analytics\PageRule;
 use App\Analytics\SiteHosts;
 use App\Analytics\Sources;
@@ -43,9 +45,11 @@ final class LiveCollector
         $hosts = SiteHosts::of($site);
         $reader = new LogWindowReader(IngestLog::for($site)->folder(), $site->log_format->parser(), $window);
         $gap = (int) config('analytics.visit_gap_minutes') * 60;
+        $notPages = NotPages::of($site);
+        $ownPaths = OwnPaths::of($site);
 
         $evidence = new VisitEvidence($hosts->hosts, (bool) config('analytics.require_rendering'), $gap,
-            (int) config('analytics.too_fast_pages'), (int) config('analytics.too_fast_seconds'));
+            (int) config('analytics.too_fast_pages'), (int) config('analytics.too_fast_seconds'), $notPages, $ownPaths);
 
         foreach ($reader->hits() as $hit) {
             if ($hosts->covers($hit)) {
@@ -54,7 +58,7 @@ final class LiveCollector
         }
 
         $evidence->finish();
-        $classifier = new Classifier($evidence);
+        $classifier = new Classifier($evidence, $ownPaths);
         $sources = new Sources($hosts->hosts);
 
         $nowTime = $now->getTimestamp();
@@ -92,9 +96,9 @@ final class LiveCollector
                 continue;
             }
 
-            $this->person($hit, $verdict->citedBy, $sources, $gap, $open, $visits);
+            $this->person($hit, $verdict->citedBy, $sources, $gap, $notPages, $open, $visits);
 
-            if ($recent && PageRule::isPage($hit)) {
+            if ($recent && PageRule::isPage($hit, $notPages)) {
                 $snapshot->pagesRecent++;
                 $snapshot->count('pages', substr($hit->path(), 0, 200) ?: '/');
             }
@@ -165,12 +169,12 @@ final class LiveCollector
      * @param  array<string, array<string, mixed>>  $open
      * @param  list<array<string, mixed>>  $visits
      */
-    private function person(LogHit $hit, string $citedBy, Sources $sources, int $gap, array &$open, array &$visits): void
+    private function person(LogHit $hit, string $citedBy, Sources $sources, int $gap, NotPages $notPages, array &$open, array &$visits): void
     {
         $key = VisitEvidence::key($hit);
         $time = $hit->when->getTimestamp();
         $visit = $open[$key] ?? null;
-        $isPage = PageRule::isPage($hit);
+        $isPage = PageRule::isPage($hit, $notPages);
         $origin = null;
         $source = null;
 

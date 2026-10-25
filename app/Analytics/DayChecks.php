@@ -2,6 +2,7 @@
 
 namespace App\Analytics;
 
+use App\Analytics\Tally\VisitJourneys;
 use App\Enums\CountKind;
 use App\Enums\TrafficGroup;
 
@@ -78,6 +79,12 @@ final class DayChecks
             CountKind::VisitExit->value => $people->readers,
             CountKind::VisitorReturning->value => $people->readers,
             CountKind::ReturningSource->value => $figures->countsOf(CountKind::VisitorReturning)['returning'] ?? 0,
+            CountKind::PeopleSystem->value => $people->readers,
+            CountKind::PeopleCity->value => $people->readers,
+            CountKind::VisitHour->value => $people->readers,
+            CountKind::PeopleSocial->value => $figures->countsOf(CountKind::PeopleSource)['Social media'] ?? 0,
+            CountKind::EngineAskedPage->value => $figures->countsOf(CountKind::EngineTier)['asked'] ?? 0,
+            CountKind::EngineTrainingPage->value => $figures->countsOf(CountKind::EngineTier)['training'] ?? 0,
         ];
 
         foreach ($parents as $kind => $parent) {
@@ -88,7 +95,75 @@ final class DayChecks
             }
         }
 
-        return [...$problems, ...self::visitProblems($figures)];
+        return [...$problems, ...self::visitProblems($figures), ...self::securityProblems($figures), ...self::crawlerProblems($figures)];
+    }
+
+    /**
+     * Each group's crawlers add up to its requests, and the assistants'
+     * fetches by kind and by assistant to theirs.
+     *
+     * @return list<string>
+     */
+    private static function crawlerProblems(DayFigures $figures): array
+    {
+        $problems = [];
+        $byGroup = [];
+
+        foreach ($figures->crawlers as $crawler) {
+            $byGroup[$crawler['group']] = ($byGroup[$crawler['group']] ?? 0) + $crawler['requests'];
+        }
+
+        foreach ($figures->groups as $group => $row) {
+            if ($group !== TrafficGroup::People->value && ($byGroup[$group] ?? 0) !== $row->requests) {
+                $problems[] = __('The crawlers of :group add up to :sum requests, not :requests.', ['group' => $group, 'sum' => $byGroup[$group] ?? 0, 'requests' => $row->requests]);
+            }
+        }
+
+        $engines = $figures->group(TrafficGroup::AnswerEngines)->requests;
+
+        foreach ([CountKind::CrawlerFetch->value => $engines, CountKind::AiAskedFetch->value => $figures->countsOf(CountKind::EngineTier)['asked'] ?? 0] as $kind => $parent) {
+            if (array_sum($figures->counts[$kind] ?? []) !== $parent) {
+                $problems[] = __('The breakdown :kind adds up to :sum, not :parent.', ['kind' => $kind, 'sum' => array_sum($figures->counts[$kind] ?? []), 'parent' => $parent]);
+            }
+        }
+
+        return $problems;
+    }
+
+    /**
+     * The probes add up by category and by answer, the injection attempts
+     * by kind, and the fake browsers by what gave them away.
+     *
+     * @return list<string>
+     */
+    private static function securityProblems(DayFigures $figures): array
+    {
+        $security = $figures->security['figures'] ?? null;
+
+        if ($security === null) {
+            return [];
+        }
+
+        $problems = [];
+
+        foreach ([
+            CountKind::SecurityCategory->value => $security['probes'],
+            CountKind::SecurityAnswer->value => $security['probes'],
+            CountKind::SecurityInjection->value => $security['injection'],
+            CountKind::SecurityFake->value => $security['fake_requests'],
+        ] as $kind => $parent) {
+            $sum = array_sum($figures->counts[$kind] ?? []);
+
+            if ($sum !== $parent) {
+                $problems[] = __('The breakdown :kind adds up to :sum, not :parent.', ['kind' => $kind, 'sum' => $sum, 'parent' => $parent]);
+            }
+        }
+
+        if ($security['answered_page'] !== $security['shell'] + $security['empty'] + $security['possible'] + $security['unknown']) {
+            $problems[] = __('The probes answered with a page do not add up to their verdicts.');
+        }
+
+        return $problems;
     }
 
     /**
@@ -123,13 +198,15 @@ final class DayChecks
         foreach ($figures->engagement as $dimension => $rows) {
             $visits = array_sum(array_column($rows, 'visits'));
             $views = array_sum(array_column($rows, 'views'));
+            $whole = in_array($dimension, VisitJourneys::WHOLE_DIMENSIONS, true);
 
-            if ($visits !== $people->readers || $views !== $people->views) {
+            if ($whole ? $visits !== $people->readers || $views !== $people->views : $visits > $people->readers || $views > $people->views) {
                 $problems[] = __('The engagement by :dimension does not add up to the visits and pages read.', ['dimension' => $dimension]);
             }
 
             foreach ($rows as $row) {
-                if (array_sum($row['seconds']) !== $row['visits'] || $row['one_page'] > $row['visits'] || $row['visits'] > $row['views']) {
+                if (array_sum($row['seconds']) !== $row['visits'] || $row['one_page'] > $row['visits'] || $row['visits'] > $row['views']
+                    || $row['not_found'] > $row['visits'] || $row['posted'] > $row['visits']) {
                     $problems[] = __('The engagement by :dimension does not add up to the visits and pages read.', ['dimension' => $dimension]);
 
                     break;

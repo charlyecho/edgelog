@@ -7,10 +7,12 @@ use App\Analytics\Classification\VisitEvidence;
 use App\Analytics\DayFigures;
 use App\Analytics\Geo\Place;
 use App\Analytics\Geo\Places;
+use App\Analytics\NotPages;
 use App\Analytics\PageRule;
 use App\Analytics\Sources;
 use App\Analytics\UserAgentLabels;
 use App\Enums\CountKind;
+use App\Enums\EngineTier;
 use App\Enums\SourceType;
 use App\Enums\TrafficGroup;
 use App\Ingest\LogHit;
@@ -50,10 +52,18 @@ final class DayTally
 
     private readonly VisitJourneys $journeys;
 
-    public function __construct(private readonly Sources $sources, int $gapSeconds = 1800, private readonly ?Places $places = null)
-    {
+    private readonly LikelyFromAi $likely;
+
+    public function __construct(
+        private readonly Sources $sources,
+        int $gapSeconds = 1800,
+        private readonly ?Places $places = null,
+        private readonly NotPages $notPages = new NotPages,
+        string $timezone = 'UTC',
+    ) {
         $this->figures = new DayFigures;
-        $this->journeys = new VisitJourneys;
+        $this->journeys = new VisitJourneys($timezone);
+        $this->likely = new LikelyFromAi;
 
         foreach (TrafficGroup::cases() as $group) {
             $this->visits[$group->value] = new VisitCounter($gapSeconds);
@@ -73,7 +83,7 @@ final class DayTally
     {
         $figures = $this->figures;
         $group = $figures->group($verdict->group);
-        $isPage = PageRule::isPage($hit);
+        $isPage = PageRule::isPage($hit, $this->notPages);
         $path = substr($hit->path(), 0, 200) ?: '/';
 
         $figures->hits++;
@@ -166,16 +176,35 @@ final class DayTally
 
         $place = $firstPage ? ($this->places?->of($hit->address, $hit->country) ?? new Place($hit->country)) : null;
 
+        $this->figures->pages[$path]['read'] = true;
+        $this->figures->pages[$path]['google'] ??= false;
+        $tags = $firstPage ? Sources::query($hit->url) : [];
+
         $this->journeys->add($people->visitOf($key), $hit, $path, $place === null ? null : [
             'country' => $place->country !== '' ? $place->country : 'Unknown',
             'city' => $place->city,
+            'region' => $place->region,
             'source' => $source->value,
             'via' => $this->via($source, $verdict, $referrer, $campaign),
             'campaign' => $campaign === Sources::NO_CAMPAIGN ? '' : $campaign,
+            'dims' => ['referrer' => $referrer, ...$this->utmTags($tags)],
         ]);
 
         if (! $firstPage) {
             return;
+        }
+
+        $this->figures->count(CountKind::PeopleSystem, UserAgentLabels::system($hit->userAgent));
+        $this->figures->count(CountKind::PeopleCity, $place->city === ''
+            ? 'Unknown'
+            : implode(CountKind::CITY_SEPARATOR, [$place->country, $place->city, $place->region]));
+
+        if ($source === SourceType::SocialMedia) {
+            $this->figures->count(CountKind::PeopleSocial, Sources::network(Sources::referrerHost($hit->referrer) ?: strtolower($tags['utm_source'] ?? '')) ?: 'Not recorded');
+        }
+
+        if ($referrer !== Sources::NO_REFERRER && $referrer !== Sources::THIS_SITE) {
+            $this->figures->count(CountKind::PeopleReferrerPage, substr($referrer.(parse_url($hit->referrer, PHP_URL_PATH) ?: '/'), 0, 200));
         }
 
         $this->readerVisits[$people->visitOf($key)] = [
@@ -194,6 +223,21 @@ final class DayTally
         if ($cited) {
             $this->figures->citedVisits++;
             $this->figures->count(CountKind::CitedBy, $verdict->citedBy);
+            [$readFirst, $landedRead] = $this->likely->cited($verdict->citedBy, $path, $time);
+
+            if ($readFirst) {
+                $this->figures->count(CountKind::AiCitedReadFirst, $verdict->citedBy);
+            }
+
+            if ($landedRead) {
+                $this->figures->count(CountKind::AiCitedLandedRead, $verdict->citedBy);
+            }
+        } elseif ($source === SourceType::Direct && ($likely = $this->likely->direct($path, $time)) !== null) {
+            $this->figures->count(CountKind::AiLikelyVisit, $likely[0]);
+
+            if ($likely[1]) {
+                $this->figures->count(CountKind::AiFetchFollowed, $likely[0]);
+            }
         }
     }
 
@@ -226,6 +270,12 @@ final class DayTally
         $this->figures->count(CountKind::EngineTier, $verdict->tier->value);
         $this->figures->count(CountKind::EngineName, $verdict->name);
         $this->figures->count(CountKind::EnginePage, $path);
+        $this->figures->count($verdict->tier === EngineTier::Asked ? CountKind::EngineAskedPage : CountKind::EngineTrainingPage, $path);
+
+        if ($verdict->tier === EngineTier::Asked) {
+            $this->likely->fetched($path, $verdict->name, $time);
+            $this->figures->count(CountKind::AiAskedFetch, LikelyFromAi::assistantOf($verdict->name));
+        }
     }
 
     private function search(Verdict $verdict, string $key, int $time, bool $isPage, string $path): void
@@ -233,6 +283,28 @@ final class DayTally
         $this->visits[TrafficGroup::SearchEngines->value]->add($key, $time, $isPage ? '' : null);
         $this->figures->count(CountKind::SearchEngine, $verdict->name);
         $this->figures->count(CountKind::SearchPage, $path);
+
+        if ($isPage && str_starts_with($verdict->name, 'Googlebot')) {
+            $this->figures->pages[$path]['read'] ??= false;
+            $this->figures->pages[$path]['google'] = true;
+        }
+    }
+
+    /**
+     * The visit's utm_ tags, lower-cased, '' for a tag it does not carry.
+     *
+     * @param  array<string, string>  $tags
+     * @return array<string, string>
+     */
+    private function utmTags(array $tags): array
+    {
+        $utm = [];
+
+        foreach (['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'] as $tag) {
+            $utm[$tag] = substr(strtolower(trim($tags[$tag] ?? '')), 0, 100);
+        }
+
+        return $utm;
     }
 
     private function other(Verdict $verdict, string $key, int $time, bool $isPage): void

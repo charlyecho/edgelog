@@ -58,18 +58,41 @@ final class DayFigures
     public array $journeys = [];
 
     /**
-     * The visits by source type and by device: [dimension][name] => row.
+     * The visits by source type, device, referrer and utm_ tag: [dimension][name] => row.
      *
-     * @var array<string, array<string, array{visits: int, views: int, one_page: int, seconds: array<string, int>}>>
+     * @var array<string, array<string, array{visits: int, views: int, one_page: int, not_found: int, posted: int, seconds: array<string, int>}>>
      */
-    public array $engagement = ['source' => [], 'device' => []];
+    public array $engagement = [];
 
     /**
-     * Each reader of the day by keyed hash: their visits, and where the first came from.
+     * Each reader of the day by keyed hash: their visits, the pages they
+     * read, and where the first came from.
      *
-     * @var array<string, array{visits: int, source: string}>
+     * @var array<string, array{visits: int, views: int, source: string}>
      */
     public array $visitors = [];
+
+    /**
+     * The day's pages read by a person or fetched by Google, for their publish dates.
+     *
+     * @var array<string, array{read: bool, google: bool}>
+     */
+    public array $pages = [];
+
+    /**
+     * The day's security (SecurityCollector): its figures, each host's
+     * answers to probes, the possible exposures, the suspects and the episodes.
+     *
+     * @var array<string, mixed>
+     */
+    public array $security = [];
+
+    /**
+     * What each crawler, assistant and bot asked for and cost (CrawlerCollector).
+     *
+     * @var list<array<string, mixed>>
+     */
+    public array $crawlers = [];
 
     public ?CarbonImmutable $firstSeen = null;
 
@@ -124,9 +147,10 @@ final class DayFigures
             }
 
             arsort($rows);
+            $keep = CountKind::KEEP[$kind] ?? $top;
 
-            if (count($rows) > $top) {
-                $kept = array_slice($rows, 0, $top - 1, true);
+            if (count($rows) > $keep) {
+                $kept = array_slice($rows, 0, $keep - 1, true);
                 $kept[CountKind::OTHERS] = ($kept[CountKind::OTHERS] ?? 0) + array_sum($rows) - array_sum($kept);
                 $rows = $kept;
             }
