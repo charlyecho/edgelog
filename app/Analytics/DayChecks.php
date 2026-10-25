@@ -72,11 +72,68 @@ final class DayChecks
             CountKind::OtherHost->value => $figures->otherHosts,
         ];
 
+        $parents += [
+            CountKind::VisitPages->value => $people->readers,
+            CountKind::VisitSeconds->value => $people->readers,
+            CountKind::VisitExit->value => $people->readers,
+            CountKind::VisitorReturning->value => $people->readers,
+            CountKind::ReturningSource->value => $figures->countsOf(CountKind::VisitorReturning)['returning'] ?? 0,
+        ];
+
         foreach ($parents as $kind => $parent) {
             $sum = array_sum($figures->counts[$kind] ?? []);
 
             if ($sum !== $parent) {
                 $problems[] = __('The breakdown :kind adds up to :sum, not :parent.', ['kind' => $kind, 'sum' => $sum, 'parent' => $parent]);
+            }
+        }
+
+        return [...$problems, ...self::visitProblems($figures)];
+    }
+
+    /**
+     * The visits add up to the readers, their pages to the pages read, and
+     * the engagement rows to both, by source and by device alike.
+     *
+     * @return list<string>
+     */
+    private static function visitProblems(DayFigures $figures): array
+    {
+        $people = $figures->group(TrafficGroup::People);
+        $problems = [];
+
+        if (count($figures->journeys) !== $people->readers) {
+            $problems[] = __('There are :count visits, not :readers.', ['count' => count($figures->journeys), 'readers' => $people->readers]);
+        }
+
+        $pages = 0;
+
+        foreach ($figures->countsOf(CountKind::VisitPages) as $read => $visits) {
+            $pages += (int) $read * $visits;
+        }
+
+        if ($pages !== $people->views) {
+            $problems[] = __('The visits read :pages pages, not :views.', ['pages' => $pages, 'views' => $people->views]);
+        }
+
+        if (array_sum($figures->countsOf(CountKind::VisitStep)) > $people->views - $people->readers) {
+            $problems[] = __('More steps between pages than pages after the first.');
+        }
+
+        foreach ($figures->engagement as $dimension => $rows) {
+            $visits = array_sum(array_column($rows, 'visits'));
+            $views = array_sum(array_column($rows, 'views'));
+
+            if ($visits !== $people->readers || $views !== $people->views) {
+                $problems[] = __('The engagement by :dimension does not add up to the visits and pages read.', ['dimension' => $dimension]);
+            }
+
+            foreach ($rows as $row) {
+                if (array_sum($row['seconds']) !== $row['visits'] || $row['one_page'] > $row['visits'] || $row['visits'] > $row['views']) {
+                    $problems[] = __('The engagement by :dimension does not add up to the visits and pages read.', ['dimension' => $dimension]);
+
+                    break;
+                }
             }
         }
 

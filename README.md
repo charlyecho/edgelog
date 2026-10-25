@@ -180,11 +180,12 @@ The rules follow Skald's
 assistants (training or answering a live question) and search crawlers by their user agent; link
 previews, libraries and self-declared bots as bots; one request for a secret or config file
 marks the whole visitor as a scanner; a browser-like visit that fetches `robots.txt` or a
-sitemap, that never loads a script, style or framework payload near its pages, or that reads
-6 pages in 2 seconds, is a bot. A person who followed an AI assistant's link (by the referrer or
-a `utm_source` tag) is a visitor from AI. A page view is a 2xx or 304 answer to a GET or HEAD for
-a page, never a file, a redirect or a framework's data fetch. A visit is one address and user
-agent with no gap over 30 minutes; a page from a new outside source starts a new one.
+sitemap, that never loads a script, style, framework payload or file of the site's own (asked
+for from its pages) near its pages, or that reads 6 pages in 2 seconds, is a bot. A person who
+followed an AI assistant's link (by the referrer or a `utm_source` tag) is a visitor from AI. A
+page view is a 2xx or 304 answer to a GET or HEAD for a page, never a file, a redirect or a
+framework's data fetch. A visit is one address and user agent with no gap over 30 minutes; a page
+from a new outside source starts a new one.
 
 A day before the site's first line is not recorded, never zero; a day the logs begin in is
 marked as partial.

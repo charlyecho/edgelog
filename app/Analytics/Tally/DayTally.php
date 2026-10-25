@@ -5,10 +5,13 @@ namespace App\Analytics\Tally;
 use App\Analytics\Classification\Verdict;
 use App\Analytics\Classification\VisitEvidence;
 use App\Analytics\DayFigures;
+use App\Analytics\Geo\Place;
+use App\Analytics\Geo\Places;
 use App\Analytics\PageRule;
 use App\Analytics\Sources;
 use App\Analytics\UserAgentLabels;
 use App\Enums\CountKind;
+use App\Enums\SourceType;
 use App\Enums\TrafficGroup;
 use App\Ingest\LogHit;
 
@@ -45,9 +48,12 @@ final class DayTally
      */
     private array $firstVisitOf = [];
 
-    public function __construct(private readonly Sources $sources, int $gapSeconds = 1800)
+    private readonly VisitJourneys $journeys;
+
+    public function __construct(private readonly Sources $sources, int $gapSeconds = 1800, private readonly ?Places $places = null)
     {
         $this->figures = new DayFigures;
+        $this->journeys = new VisitJourneys;
 
         foreach (TrafficGroup::cases() as $group) {
             $this->visits[$group->value] = new VisitCounter($gapSeconds);
@@ -104,6 +110,7 @@ final class DayTally
         }
 
         $this->figures->signedInReaders = count(array_intersect_key($this->signedInVisits, $this->readerVisits));
+        $this->journeys->finish($this->figures);
 
         foreach ($this->figures->users as $uid => &$user) {
             $origin = $this->readerVisits[$this->firstVisitOf[$uid]] ?? null;
@@ -134,8 +141,11 @@ final class DayTally
 
     private function personVisit(LogHit $hit, Verdict $verdict, string $key, int $time, bool $isPage, string $path): void
     {
+        $people = $this->visits[TrafficGroup::People->value];
+
         if (! $isPage) {
-            $this->visits[TrafficGroup::People->value]->add($key, $time);
+            $people->add($key, $time);
+            $this->journeys->add($people->visitOf($key), $hit, null);
 
             return;
         }
@@ -147,18 +157,28 @@ final class DayTally
         $referrer = $this->sources->referrerLabel($hit->referrer);
         $campaign = Sources::campaign($hit->url);
 
-        $firstPage = $this->visits[TrafficGroup::People->value]->add(
+        $firstPage = $people->add(
             $key,
             $time,
             "{$source->value}\0{$referrer}\0{$campaign}",
             ! $source->isInside(),
         );
 
+        $place = $firstPage ? ($this->places?->of($hit->address, $hit->country) ?? new Place($hit->country)) : null;
+
+        $this->journeys->add($people->visitOf($key), $hit, $path, $place === null ? null : [
+            'country' => $place->country !== '' ? $place->country : 'Unknown',
+            'city' => $place->city,
+            'source' => $source->value,
+            'via' => $this->via($source, $verdict, $referrer, $campaign),
+            'campaign' => $campaign === Sources::NO_CAMPAIGN ? '' : $campaign,
+        ]);
+
         if (! $firstPage) {
             return;
         }
 
-        $this->readerVisits[$this->visits[TrafficGroup::People->value]->visitOf($key)] = [
+        $this->readerVisits[$people->visitOf($key)] = [
             'source' => $source->value,
             'referrer' => $referrer,
             'landing' => $path,
@@ -167,7 +187,7 @@ final class DayTally
         $this->figures->count(CountKind::PeopleSource, $source->value);
         $this->figures->count(CountKind::PeopleReferrer, $referrer);
         $this->figures->count(CountKind::PeopleCampaign, $campaign);
-        $this->figures->count(CountKind::PeopleCountry, $hit->country !== '' ? $hit->country : 'Unknown');
+        $this->figures->count(CountKind::PeopleCountry, $place->country !== '' ? $place->country : 'Unknown');
         $this->figures->count(CountKind::PeopleDevice, UserAgentLabels::device($hit->userAgent));
         $this->figures->count(CountKind::PeopleBrowser, UserAgentLabels::browser($hit->userAgent));
 
@@ -175,6 +195,29 @@ final class DayTally
             $this->figures->citedVisits++;
             $this->figures->count(CountKind::CitedBy, $verdict->citedBy);
         }
+    }
+
+    /**
+     * Who sent the visitor: the assistant, the referring site, or the
+     * campaign's source when a tagged link came without a referrer.
+     */
+    private function via(SourceType $source, Verdict $verdict, string $referrer, string $campaign): string
+    {
+        if ($source === SourceType::AiAssistant) {
+            return $verdict->citedBy;
+        }
+
+        if ($source->isInside()) {
+            return '';
+        }
+
+        if ($referrer !== Sources::NO_REFERRER && $referrer !== Sources::THIS_SITE) {
+            return $referrer;
+        }
+
+        $tagged = $campaign === Sources::NO_CAMPAIGN ? '-' : explode(' / ', $campaign)[0];
+
+        return $tagged === '-' ? '' : $tagged;
     }
 
     private function engine(Verdict $verdict, string $key, int $time, bool $isPage, string $path): void

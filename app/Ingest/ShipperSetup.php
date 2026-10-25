@@ -93,4 +93,23 @@ final readonly class ShipperSetup
             journalctl -u edgelog-ship -f
             SH;
     }
+
+    /**
+     * Keep stylesheets and scripts in nginx's log, and only images and fonts out.
+     */
+    public static function nginxAssetLogging(): string
+    {
+        return <<<'NGINX'
+            location ^~ /assets/ {
+                expires 30d;
+                try_files $uri =404;
+
+                # Images and fonts may stay out of the log; stylesheets and scripts may not.
+                location ~* \.(?:png|jpe?g|gif|webp|avif|svg|ico|ttf|woff2?)$ {
+                    access_log off;
+                    expires 30d;
+                }
+            }
+            NGINX;
+    }
 }

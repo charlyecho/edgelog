@@ -113,6 +113,26 @@ class ClassifierTest extends TestCase
         $this->assertSame(VisitEvidence::NOT_RENDERED, $verdict->name);
     }
 
+    public function test_a_file_of_the_site_asked_for_from_the_page_shows_it_was_drawn(): void
+    {
+        $day = [
+            $this->hit('/artist/book'),
+            $this->hit('/image/42.jpg', second: 1, referrer: 'https://example.com/artist/book'),
+        ];
+
+        $this->assertSame(TrafficGroup::People, $this->verdictOf($day, $day[0])->group);
+    }
+
+    public function test_a_file_asked_for_from_nowhere_does_not_show_a_page_was_drawn(): void
+    {
+        $day = [
+            $this->hit('/artist/book'),
+            $this->hit('/image/42.jpg', second: 1),
+        ];
+
+        $this->assertSame(VisitEvidence::NOT_RENDERED, $this->verdictOf($day, $day[0])->name);
+    }
+
     public function test_a_browser_that_drew_earlier_that_day_stays_a_person(): void
     {
         $later = $this->hit('/blog/', second: 3 * 3600);

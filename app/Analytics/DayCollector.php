@@ -4,6 +4,7 @@ namespace App\Analytics;
 
 use App\Analytics\Classification\Classifier;
 use App\Analytics\Classification\VisitEvidence;
+use App\Analytics\Geo\Places;
 use App\Analytics\Tally\DayTally;
 use App\Enums\ConversionAction;
 use App\Enums\CountKind;
@@ -18,6 +19,8 @@ use App\Models\Site;
  */
 final class DayCollector
 {
+    public function __construct(private readonly Places $places) {}
+
     /**
      * The day's figures, or null when the logs hold nothing for it (a day
      * before the site's first line is missing, never zero).
@@ -37,6 +40,7 @@ final class DayCollector
 
         $newest = PHP_INT_MIN;
         $lateness = 0;
+        $stylesheets = 0;
 
         foreach ($reader->hits() as $hit) {
             $time = $hit->when->getTimestamp();
@@ -45,6 +49,7 @@ final class DayCollector
 
             if ($hosts->covers($hit)) {
                 $evidence->add($hit);
+                $stylesheets += str_ends_with(strtolower($hit->path()), '.css') ? 1 : 0;
             }
         }
 
@@ -54,16 +59,18 @@ final class DayCollector
 
         $evidence->finish();
         $classifier = new Classifier($evidence);
-        $tally = new DayTally(new Sources($hosts->hosts), (int) config('analytics.visit_gap_minutes') * 60);
+        $tally = new DayTally(new Sources($hosts->hosts), (int) config('analytics.visit_gap_minutes') * 60, $this->places);
 
         foreach (TimeOrdered::of($reader->hits(), max(60, $lateness + 1)) as $hit) {
             $hosts->covers($hit) ? $tally->add($hit, $classifier->classify($hit)) : $tally->otherHost($hit->host);
         }
 
         $figures = $tally->finish();
+        ReturningVisitors::mark($site, $window->day, $figures);
         $this->addRevenue($site, $window, $figures);
         $figures->parsed = $reader->lines;
         $figures->unparsed = $reader->unparsed;
+        $figures->stylesheets = $stylesheets;
         $figures->partialFrom = $reader->reachesBack ? null : $figures->firstSeen;
 
         return $figures;

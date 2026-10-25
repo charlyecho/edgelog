@@ -26,4 +26,17 @@ final readonly class AnyOfParser implements LogLineParser
 
         return null;
     }
+
+    public function timestamp(string $line): ?int
+    {
+        foreach ($this->parsers as $parser) {
+            $timestamp = $parser->timestamp($line);
+
+            if ($timestamp !== null) {
+                return $timestamp;
+            }
+        }
+
+        return null;
+    }
 }

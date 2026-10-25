@@ -27,11 +27,23 @@ enum CountKind: string
     case RevenuePaid = 'revenue_paid';
     case RevenueRefunded = 'revenue_refunded';
     case Payments = 'payments';
+    case VisitPages = 'visit_pages';
+    case VisitSeconds = 'visit_seconds';
+    case VisitExit = 'visit_exit';
+    case VisitStep = 'visit_step';
+    case VisitFlag = 'visit_flag';
+    case VisitorReturning = 'visitor_returning';
+    case ReturningSource = 'returning_source';
 
     /**
      * The breakdowns of money, by currency (never added across currencies).
      */
     public const array REVENUE = ['revenue_paid', 'revenue_refunded', 'payments'];
+
+    /**
+     * The histograms a median is read from: every row kept, never folded.
+     */
+    public const array UNFOLDED = ['visit_pages', 'visit_seconds'];
 
     /**
      * The name a folded tail is kept under.
@@ -63,6 +75,13 @@ enum CountKind: string
             self::RevenuePaid => __('Revenue'),
             self::RevenueRefunded => __('Refunds'),
             self::Payments => __('Payments'),
+            self::VisitPages => __('Visits by pages read'),
+            self::VisitSeconds => __('Visits by length'),
+            self::VisitExit => __('Where visits ended'),
+            self::VisitStep => __('Common next steps'),
+            self::VisitFlag => __('Visits that met a page not found or sent a form'),
+            self::VisitorReturning => __('New and returning visitors'),
+            self::ReturningSource => __('Returning visitors by source'),
         };
     }
 
@@ -74,7 +93,10 @@ enum CountKind: string
         return match ($this) {
             self::PeoplePage => __('pages read'),
             self::PeopleLanding, self::PeopleSource, self::PeopleReferrer, self::PeopleCampaign,
-            self::PeopleCountry, self::PeopleDevice, self::PeopleBrowser, self::CitedBy => __('visitors'),
+            self::PeopleCountry, self::PeopleDevice, self::PeopleBrowser, self::CitedBy,
+            self::VisitPages, self::VisitSeconds, self::VisitExit, self::VisitFlag,
+            self::VisitorReturning, self::ReturningSource => __('visitors'),
+            self::VisitStep => __('moves'),
             self::RevenuePaid, self::RevenueRefunded => __('in the currency\'s minor unit'),
             self::Payments => __('payments'),
             default => __('requests'),

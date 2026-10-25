@@ -22,6 +22,8 @@ final readonly class ExtendedLogParser implements LogLineParser
         ."                            '\$status \$body_bytes_sent \"\$http_referer\" \"\$http_user_agent\" '\n"
         ."                            '\$request_time cc=\$http_cf_ipcountry rid=\$request_id';";
 
+    private const string TIME_FORMAT = 'Y-m-d\TH:i:sP';
+
     public function parse(string $line): ?LogHit
     {
         $pattern = '/^(?<when>\S+) (?<address>\S+) (?<host>\S+) "(?<request>'.self::QUOTED.')" '
@@ -31,7 +33,7 @@ final readonly class ExtendedLogParser implements LogLineParser
             return null;
         }
 
-        $when = $this->time('Y-m-d\TH:i:sP', $fields['when']);
+        $when = $this->time(self::TIME_FORMAT, $fields['when']);
 
         if ($when === null) {
             return null;
@@ -65,5 +67,14 @@ final readonly class ExtendedLogParser implements LogLineParser
             requestLength: $this->bytes($requestLength),
             userId: $this->userId($userId),
         );
+    }
+
+    public function timestamp(string $line): ?int
+    {
+        if (preg_match('/^(\d{4}-\d\d-\d\dT\S+) /', $line, $fields) !== 1) {
+            return null;
+        }
+
+        return $this->unixTime(self::TIME_FORMAT, $fields[1]);
     }
 }

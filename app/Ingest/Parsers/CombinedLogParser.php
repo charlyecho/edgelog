@@ -18,6 +18,8 @@ final readonly class CombinedLogParser implements LogLineParser
 {
     use ReadsLogFields;
 
+    private const string TIME_FORMAT = 'd/M/Y:H:i:s O';
+
     public function __construct(private LogFormat $format = LogFormat::NginxCombined) {}
 
     public function parse(string $line): ?LogHit
@@ -29,7 +31,7 @@ final readonly class CombinedLogParser implements LogLineParser
             return null;
         }
 
-        $when = $this->time('d/M/Y:H:i:s O', $fields['when']);
+        $when = $this->time(self::TIME_FORMAT, $fields['when']);
 
         if ($when === null) {
             return null;
@@ -62,5 +64,14 @@ final readonly class CombinedLogParser implements LogLineParser
             requestLength: $this->bytes($requestLength),
             userId: $this->userId($userId),
         );
+    }
+
+    public function timestamp(string $line): ?int
+    {
+        if (preg_match('/^\S+ \S+ \S+ \[([^\]]+)\]/', $line, $fields) !== 1) {
+            return null;
+        }
+
+        return $this->unixTime(self::TIME_FORMAT, $fields[1]);
     }
 }

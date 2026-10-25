@@ -11,7 +11,6 @@
     $before = $previous->group(TrafficGroup::People);
     $engines = $period->group(TrafficGroup::AnswerEngines);
     $comparable = $period->comparableWith($previous);
-    $verified = $period->verified()->count();
     $whole = $period->verified()->filter(fn ($day) => ! $day->isPartial())->count();
     $daily = fn (TrafficGroup $group, string $figure) => $period->daily(fn ($day) => SitePeriod::figureOf($day, $group, $figure));
     $perVisit = fn ($figures) => $figures->readers > 0 ? $figures->views / $figures->readers : 0;
@@ -61,29 +60,7 @@
 
     <x-site-tabs :team="$team" :site="$site" current="summary" />
 
-    <p class="mb-3 text-[13px] text-ink-2">
-        @if ($period->length() === 1)
-            {{ __('Yesterday, :day', ['day' => $period->first->translatedFormat('l j M')]) }}
-        @else
-            {{ __('Last :count whole days, :from to :to', ['count' => $period->length(), 'from' => $period->first->translatedFormat('j M'), 'to' => $period->last->translatedFormat('j M')]) }}
-        @endif
-        ·
-        @if ($whole === $period->length())
-            {{ $period->length() === 1 ? __('the day is whole and verified') : __('every day whole and verified') }}
-        @else
-            {{ __(':verified of :days days verified', ['verified' => $verified, 'days' => $period->length()]) }}
-            @if ($period->withheld() !== [])
-                · <span class="text-bad">{{ trans_choice(':count withheld|:count withheld', count($period->withheld())) }}</span>
-            @endif
-            @if ($period->pending() !== [])
-                · {{ trans_choice(':count being checked|:count being checked', count($period->pending())) }}
-            @endif
-            @if ($period->missing() !== [])
-                · {{ trans_choice(':count not recorded|:count not recorded', count($period->missing())) }}
-            @endif
-        @endif
-        · {{ __('All pages') }}
-    </p>
+    <x-period-line :period="$period" />
 
     @if (! $period->hasFigures())
         <x-card :title="__('No figures yet')" :description="__('A day is counted once it is over where the site is, then counted a second time by the audit. Its figures show here only when both counts agree.')">
@@ -156,7 +133,9 @@
             @endif
 
             <div class="grid gap-4 lg:grid-cols-2">
-                <x-top-list :title="__('Countries')" :unit="__('visitors')" :rows="$countries" :total="$people->readers" />
+                <x-top-list :title="__('Countries')" :unit="__('visitors')" :rows="$countries" :total="$people->readers">
+                    <x-geoip-credit class="mt-2" />
+                </x-top-list>
                 <x-top-list :title="__('Top pages')" :unit="__('pages read')" :rows="$pages" :total="$people->views" />
                 <x-top-list :title="__('Top sources')" :unit="__('visitors, by where they came from')" :rows="$sources" :total="$people->readers" />
                 <x-top-list :title="__('AI assistants')" :unit="__('requests, answering a question or collecting for training')" :rows="$assistants" :total="$engines->requests" tint="var(--group-answer_engines)" />

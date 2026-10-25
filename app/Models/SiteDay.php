@@ -7,11 +7,13 @@ use App\Enums\CountKind;
 use App\Enums\DayStatus;
 use App\Enums\EngineTier;
 use App\Enums\TrafficGroup;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Attributes\Guarded;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Arr;
 
 /**
  * One day of a site's figures, in the time zone it was cut in.
@@ -19,6 +21,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[Guarded(['id'])]
 class SiteDay extends Model
 {
+    /**
+     * Requests from which a day with no stylesheet is taken as a log that leaves them out.
+     */
+    public const int BUSY_DAY_HITS = 200;
+
     /**
      * Get the attributes that should be cast.
      *
@@ -71,6 +78,30 @@ class SiteDay extends Model
     }
 
     /**
+     * @return HasMany<SiteVisit, $this>
+     */
+    public function visits(): HasMany
+    {
+        return $this->hasMany(SiteVisit::class);
+    }
+
+    /**
+     * @return HasMany<SiteVisitorDay, $this>
+     */
+    public function visitors(): HasMany
+    {
+        return $this->hasMany(SiteVisitorDay::class);
+    }
+
+    /**
+     * @return HasMany<SiteDayEngagement, $this>
+     */
+    public function engagements(): HasMany
+    {
+        return $this->hasMany(SiteDayEngagement::class);
+    }
+
+    /**
      * Only the days whose figures may be shown: counted twice, and both roads agree.
      *
      * @param  Builder<SiteDay>  $query
@@ -100,6 +131,7 @@ class SiteDay extends Model
                 'cited_visits' => $figures->citedVisits,
                 'signed_in_users' => count($figures->users),
                 'signed_in_readers' => $figures->signedInReaders,
+                'stylesheets' => $figures->stylesheets,
                 'first_seen' => $figures->firstSeen,
                 'last_seen' => $figures->lastSeen,
                 'partial_from' => $figures->partialFrom,
@@ -139,9 +171,54 @@ class SiteDay extends Model
             }
 
             self::rememberUsers($site, $day, $figures);
+            self::storeVisits($siteDay, $figures);
 
             return $siteDay;
         });
+    }
+
+    /**
+     * Keep the day's engagement for good, and its visits and visitors' hashes
+     * only when the day is recent enough for them to be kept at all.
+     */
+    private static function storeVisits(self $siteDay, DayFigures $figures): void
+    {
+        $siteDay->engagements()->delete();
+        $siteDay->visits()->delete();
+        $siteDay->visitors()->delete();
+
+        foreach ($figures->engagement as $dimension => $rows) {
+            foreach ($rows as $name => $row) {
+                $siteDay->engagements()->create(['dimension' => $dimension, 'name' => (string) $name, ...$row]);
+            }
+        }
+
+        $age = (int) CarbonImmutable::parse($siteDay->day->toDateString())->diffInDays(now($siteDay->timezone)->toDateString());
+
+        if ($age < (int) config('analytics.journey_days')) {
+            $rows = array_map(fn (array $journey) => [
+                'site_day_id' => $siteDay->id,
+                ...Arr::except($journey, ['visitor']),
+                'started_at' => CarbonImmutable::createFromTimestamp($journey['started_at']),
+                'trail' => json_encode($journey['trail']),
+            ], $figures->journeys);
+
+            foreach (array_chunk($rows, 500) as $chunk) {
+                SiteVisit::query()->insert($chunk);
+            }
+        }
+
+        if ($age < (int) config('analytics.returning_days')) {
+            $rows = array_map(
+                fn (string $visitor, array $seen) => ['site_day_id' => $siteDay->id, 'visitor' => $visitor, ...$seen],
+                array_keys($figures->visitors),
+                $figures->visitors,
+            );
+
+            foreach (array_chunk($rows, 500) as $chunk) {
+                SiteVisitorDay::query()->insert($chunk);
+            }
+        }
     }
 
     /**
@@ -209,6 +286,15 @@ class SiteDay extends Model
         }
 
         return $core;
+    }
+
+    /**
+     * Determine if the day's log seems to leave stylesheets out: a busy day
+     * with none, so a page is told drawn only by the other files it asked for.
+     */
+    public function lacksStylesheets(): bool
+    {
+        return $this->hits >= self::BUSY_DAY_HITS && $this->stylesheets === 0;
     }
 
     /**

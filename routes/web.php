@@ -9,6 +9,7 @@ use App\Http\Controllers\SiteIntegrationController;
 use App\Http\Controllers\SiteRealtimeController;
 use App\Http\Controllers\SiteTeamController;
 use App\Http\Controllers\SiteTokenController;
+use App\Http\Controllers\SiteTrafficController;
 use App\Http\Controllers\TeamController;
 use App\Http\Controllers\TeamInvitationController;
 use App\Http\Controllers\TeamMemberController;
@@ -52,6 +53,7 @@ Route::middleware('auth')->group(function () {
             Route::post('/teams/{team}/sites', [SiteController::class, 'store'])->name('teams.sites.store');
             Route::get('/teams/{team}/sites/{site}', [SiteController::class, 'show'])->name('teams.sites.show');
             Route::get('/teams/{team}/sites/{site}/realtime', SiteRealtimeController::class)->name('teams.sites.realtime');
+            Route::get('/teams/{team}/sites/{site}/traffic/visitors', [SiteTrafficController::class, 'visitors'])->name('teams.sites.traffic.visitors');
             Route::get('/teams/{team}/sites/{site}/settings', [SiteController::class, 'edit'])->name('teams.sites.edit');
             Route::put('/teams/{team}/sites/{site}', [SiteController::class, 'update'])->name('teams.sites.update');
             Route::delete('/teams/{team}/sites/{site}', [SiteController::class, 'destroy'])->name('teams.sites.destroy');

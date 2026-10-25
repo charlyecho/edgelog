@@ -30,6 +30,17 @@ class LogParserTest extends TestCase
         $this->assertSame(LogFormat::NginxCombined, $hit->format);
     }
 
+    public function test_the_time_alone_is_read_the_same_as_with_the_whole_line(): void
+    {
+        $combined = LogFormat::NginxCombined->parser();
+        $extended = LogFormat::NginxExtended->parser();
+
+        $this->assertSame($combined->parse(self::COMBINED)->when->getTimestamp(), $combined->timestamp(self::COMBINED));
+        $this->assertSame($extended->parse(self::EXTENDED)->when->getTimestamp(), $extended->timestamp(self::EXTENDED));
+        $this->assertNull(LogFormat::NginxExtended->parser()->timestamp(self::COMBINED));
+        $this->assertNull(LogFormat::NginxCombined->parser()->timestamp('not a log line'));
+    }
+
     public function test_apache_lines_are_marked_as_apache(): void
     {
         $this->assertSame(LogFormat::ApacheCombined, LogFormat::ApacheCombined->parser()->parse(self::COMBINED)?->format);

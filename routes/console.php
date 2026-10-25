@@ -10,3 +10,4 @@ Artisan::command('inspire', function () {
 
 Schedule::command('edgelog:run-daily')->hourly()->withoutOverlapping();
 Schedule::command('edgelog:live')->everyTwoMinutes()->withoutOverlapping();
+Schedule::command('edgelog:geoip-update')->monthlyOn(3, '04:00');

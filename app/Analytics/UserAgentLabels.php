@@ -40,6 +40,23 @@ final class UserAgentLabels
     }
 
     /**
+     * The operating system, as far as the user agent says.
+     */
+    public static function system(string $agent): string
+    {
+        return match (true) {
+            preg_match('~iPhone|iPod~i', $agent) === 1 => 'iOS',
+            preg_match('~iPad~i', $agent) === 1 => 'iPadOS',
+            preg_match('~Android~i', $agent) === 1 => 'Android',
+            preg_match('~CrOS~i', $agent) === 1 => 'ChromeOS',
+            preg_match('~Windows~i', $agent) === 1 => 'Windows',
+            preg_match('~Mac OS X|Macintosh~i', $agent) === 1 => 'macOS',
+            preg_match('~Linux|X11~i', $agent) === 1 => 'Linux',
+            default => 'Other',
+        };
+    }
+
+    /**
      * Desktop, Mobile or Tablet. An Android browser without "Mobile" is a tablet.
      */
     public static function device(string $agent): string

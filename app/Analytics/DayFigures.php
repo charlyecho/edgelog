@@ -36,12 +36,40 @@ final class DayFigures
     public int $signedInReaders = 0;
 
     /**
+     * Stylesheets asked for on the site's hosts. None on a busy day means
+     * the web server leaves them out of its log: not a figure, only a
+     * warning for the site's settings, so the audit does not recount it.
+     */
+    public int $stylesheets = 0;
+
+    /**
      * Each signed-in user of the day: their page views, and where the day's
      * first visit they were signed in came from.
      *
      * @var array<string, array{views: int, source: ?string, referrer: ?string, landing: ?string, first_seen: CarbonImmutable}>
      */
     public array $users = [];
+
+    /**
+     * People's visits that read a page, oldest first, as VisitJourneys keeps them.
+     *
+     * @var list<array<string, mixed>>
+     */
+    public array $journeys = [];
+
+    /**
+     * The visits by source type and by device: [dimension][name] => row.
+     *
+     * @var array<string, array<string, array{visits: int, views: int, one_page: int, seconds: array<string, int>}>>
+     */
+    public array $engagement = ['source' => [], 'device' => []];
+
+    /**
+     * Each reader of the day by keyed hash: their visits, and where the first came from.
+     *
+     * @var array<string, array{visits: int, source: string}>
+     */
+    public array $visitors = [];
 
     public ?CarbonImmutable $firstSeen = null;
 
@@ -91,7 +119,7 @@ final class DayFigures
     public function fold(int $top = self::TOP): void
     {
         foreach ($this->counts as $kind => $rows) {
-            if (in_array($kind, CountKind::REVENUE, true)) {
+            if (in_array($kind, [...CountKind::REVENUE, ...CountKind::UNFOLDED], true)) {
                 continue;
             }
 

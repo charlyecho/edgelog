@@ -45,4 +45,6 @@
             @endforeach
         </ol>
     @endif
+
+    {{ $slot }}
 </section>

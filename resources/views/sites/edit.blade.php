@@ -63,6 +63,17 @@
                 </li>
             </ol>
 
+            @if ($lastDay?->lacksStylesheets())
+                <x-notice tone="warn" class="mt-4" :title="__('The log has no stylesheets')">
+                    <div class="grid gap-1.5">
+                        <p>{{ __('On :day, :count requests and not one stylesheet: the web server seems to leave .css and .js files out of the log (access_log off). Edgelog tells a person, who sees the page, from a script, which only fetches it, by the files the page asks for; without them it can only go by images, and counts too many bots.', ['day' => $lastDay->day->isoFormat('LL'), 'count' => \Illuminate\Support\Number::format($lastDay->hits)]) }}</p>
+                        <p>{{ __('Keep stylesheets and scripts in the log; images and fonts may stay out. For nginx, in the location that serves them:') }}</p>
+                        <x-code :code="\App\Ingest\ShipperSetup::nginxAssetLogging()" />
+                        <p class="text-xs text-ink-3">{{ __('If the site\'s pages have no stylesheet at all, there is nothing to change.') }}</p>
+                    </div>
+                </x-notice>
+            @endif
+
             @if ($site->log_format === \App\Enums\LogFormat::NginxExtended)
                 <div class="mt-4 grid gap-1.5 border-t border-grid pt-4">
                     <p>{{ __('The extended format: add this to nginx\'s http block, then use it on the site\'s access_log line (access_log /var/log/nginx/access.log edgelog_extended;).') }}</p>

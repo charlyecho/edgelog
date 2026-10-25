@@ -17,9 +17,13 @@ use App\Ingest\LogHit;
  *   that fetched robots.txt, a sitemap, ads.txt or security.txt without
  *   loading the site's own assets once per page it read is a crawler.
  * - A browser-like visit that read pages and never drew one (no script,
- *   style or framework payload from 5 s before to 30 s after one of its
- *   pages, and no visit of the same address and agent drew one earlier that
- *   day) is a scraper in a browser's clothes.
+ *   style or framework payload, and no file of the site asked for from one
+ *   of its pages, from 5 s before to 30 s after one of its pages, and no
+ *   visit of the same address and agent drew one earlier that day) is a
+ *   scraper in a browser's clothes. The site's own files count because a
+ *   server may leave scripts and styles out of its log, and a browser may
+ *   keep them in its cache: an image or a manifest asked for from the page
+ *   still shows it was drawn.
  * - A browser-like visit with 6 page views or more, all within 2 seconds of
  *   its first, is too fast to be a person.
  *
@@ -108,7 +112,7 @@ final class VisitEvidence
         $isAsset = preg_match(Patterns::ASSET, $path) === 1 || preg_match(Patterns::RSC_PAYLOAD, $hit->url) === 1;
 
         if ($isAsset && $this->referredByOwnSite($hit)) {
-            $flags |= self::OWN_ASSET;
+            $flags |= self::OWN_ASSET | self::RENDER;
         }
 
         if (preg_match(Patterns::RENDER_ASSET, $path) === 1 || preg_match(Patterns::RSC_PAYLOAD, $hit->url) === 1) {
@@ -217,8 +221,9 @@ final class VisitEvidence
     }
 
     /**
-     * A page was drawn: one of its scripts, styles or payloads was fetched
-     * from 5 seconds before to 30 seconds after it.
+     * A page was drawn: one of its scripts, styles or payloads, or a file of
+     * the site asked for from one of its pages, was fetched from 5 seconds
+     * before to 30 seconds after it.
      *
      * @param  list<array{0: int, 1: int}>  $pages
      * @param  list<array{0: int, 1: int}>  $renders

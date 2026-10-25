@@ -36,4 +36,32 @@ return [
     // not seen for this long is forgotten.
     'users_kept_days' => (int) env('ANALYTICS_USERS_KEPT_DAYS', 400),
 
+    // Days each anonymous visit (its labels, pages and times) is kept for
+    // the list of visits and the visitor flow. The day's counts stay.
+    'journey_days' => (int) env('ANALYTICS_JOURNEY_DAYS', 7),
+
+    // Days a reader's keyed hash is kept: a visitor seen on an earlier day
+    // within this window is returning.
+    'returning_days' => (int) env('ANALYTICS_RETURNING_DAYS', 30),
+
+    // The secret of those hashes. Empty: one drawn from APP_KEY.
+    'visitor_key' => env('ANALYTICS_VISITOR_KEY', ''),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Where visitors are
+    |--------------------------------------------------------------------------
+    |
+    | MaxMind-format files that tell a visitor's country and city from their
+    | address, when the log line does not carry a country of its own. DB-IP's
+    | free Lite files (CC BY 4.0) by default, kept up to date each month by
+    | edgelog:geoip-update. A missing file: the country or city is not recorded.
+    |
+    */
+
+    'geoip' => [
+        'country' => env('ANALYTICS_COUNTRY_DB', storage_path('app/geoip/dbip-country-lite.mmdb')),
+        'city' => env('ANALYTICS_CITY_DB', storage_path('app/geoip/dbip-city-lite.mmdb')),
+    ],
+
 ];

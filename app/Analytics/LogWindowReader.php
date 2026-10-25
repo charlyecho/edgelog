@@ -34,6 +34,14 @@ final class LogWindowReader
      */
     public bool $reachesBack = false;
 
+    /**
+     * Where each file's lines stop being older than the window, found by the
+     * first pass, and whether any were: the next pass starts there.
+     *
+     * @var array<string, array{offset: int, skipped: bool}>
+     */
+    private array $resumeAt = [];
+
     public function __construct(
         private readonly string $folder,
         private readonly LogLineParser $parser,
@@ -50,11 +58,37 @@ final class LogWindowReader
         $this->lines = $this->unparsed = 0;
         $this->reachesBack = false;
         $inWindow = false;
+        $start = $this->window->start->getTimestamp();
         $files = $this->files();
 
         foreach ($files as $file) {
-            foreach ($this->linesOf($file) as $line) {
+            $key = $file.':'.fileinode($file);
+            $resume = $this->resumeAt[$key] ?? ['offset' => 0, 'skipped' => false];
+            $skipping = true;
+
+            if ($resume['skipped']) {
+                $this->reachesBack = true;
+                $inWindow = false;
+            }
+
+            foreach ($this->linesOf($file, $resume['offset']) as $offset => $line) {
+                $timestamp = trim($line) === '' ? null : $this->parser->timestamp($line);
+                $older = $timestamp !== null && $timestamp < $start;
+
+                if ($skipping && (trim($line) === '' || $older)) {
+                    $resume = ['offset' => $offset + strlen($line), 'skipped' => $resume['skipped'] || $older];
+                } else {
+                    $skipping = false;
+                }
+
                 if (trim($line) === '') {
+                    continue;
+                }
+
+                if ($older) {
+                    $this->reachesBack = true;
+                    $inWindow = false;
+
                     continue;
                 }
 
@@ -84,6 +118,8 @@ final class LogWindowReader
                     yield $hit;
                 }
             }
+
+            $this->resumeAt[$key] = $resume;
         }
     }
 
@@ -123,9 +159,11 @@ final class LogWindowReader
     }
 
     /**
+     * The lines of the file from the given byte, keyed by where each starts.
+     *
      * @return Generator<int, string>
      */
-    private function linesOf(string $path): Generator
+    private function linesOf(string $path, int $from = 0): Generator
     {
         $gzip = str_ends_with($path, '.gz');
         $handle = $gzip ? gzopen($path, 'rb') : fopen($path, 'rb');
@@ -135,8 +173,16 @@ final class LogWindowReader
         }
 
         try {
+            $offset = $from;
+
+            if ($from > 0) {
+                $gzip ? gzseek($handle, $from) : fseek($handle, $from);
+            }
+
             while (($line = $gzip ? gzgets($handle) : fgets($handle)) !== false) {
-                yield $line;
+                yield $offset => $line;
+
+                $offset += strlen($line);
             }
         } finally {
             $gzip ? gzclose($handle) : fclose($handle);

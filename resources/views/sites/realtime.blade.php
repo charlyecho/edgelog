@@ -96,7 +96,8 @@
                             @endforeach
                         </tbody>
                     </table>
-                    <p class="mt-2 text-xs text-ink-3">{{ __('A country comes from the log\'s own country field (the extended nginx format); without it, it is not recorded.') }}</p>
+                    <p class="mt-2 text-xs text-ink-3">{{ __('A country comes from the log\'s own country field (the extended nginx format), else from the visitor\'s address; without either, it is not recorded.') }}</p>
+                    <x-geoip-credit class="mt-1" />
                 @endif
             </section>
 

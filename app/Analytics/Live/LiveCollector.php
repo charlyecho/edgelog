@@ -5,6 +5,7 @@ namespace App\Analytics\Live;
 use App\Analytics\Classification\Classifier;
 use App\Analytics\Classification\VisitEvidence;
 use App\Analytics\DayWindow;
+use App\Analytics\Geo\Places;
 use App\Analytics\LogWindowReader;
 use App\Analytics\PageRule;
 use App\Analytics\SiteHosts;
@@ -32,6 +33,8 @@ final class LiveCollector
     public const int RECENT_SECONDS = 1800;
 
     public const int MINUTES = 30;
+
+    public function __construct(private readonly Places $places) {}
 
     public function collect(Site $site): LiveSnapshot
     {
@@ -184,7 +187,7 @@ final class LiveCollector
             }
 
             $visit = ['start' => $time, 'last' => $time, 'pages' => 0, 'origin' => null, 'landing' => null,
-                'source' => null, 'from' => null, 'country' => $hit->country ?: 'Unknown',
+                'source' => null, 'from' => null, 'country' => $this->places->of($hit->address, $hit->country)->country ?: 'Unknown',
                 'device' => UserAgentLabels::device($hit->userAgent), 'users' => []];
         }
 

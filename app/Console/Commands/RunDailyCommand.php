@@ -9,6 +9,8 @@ use App\Models\Site;
 use App\Models\SiteDay;
 use App\Models\SiteDayUser;
 use App\Models\SiteUser;
+use App\Models\SiteVisit;
+use App\Models\SiteVisitorDay;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
@@ -44,6 +46,7 @@ class RunDailyCommand extends Command
         });
 
         $this->forgetOldUsers();
+        $this->forgetOldVisits();
         $this->components->info("Queued {$queued} site days.");
 
         return self::SUCCESS;
@@ -59,5 +62,19 @@ class RunDailyCommand extends Command
 
         SiteDayUser::query()->whereIn('site_day_id', SiteDay::query()->where('day', '<', $before)->select('id'))->delete();
         SiteUser::query()->where('last_seen_day', '<', $before)->delete();
+    }
+
+    /**
+     * Visits are kept journey_days and visitors' hashes returning_days, no
+     * longer, counted from today: the days' counts stay.
+     */
+    private function forgetOldVisits(): void
+    {
+        $olderThan = fn (string $setting) => SiteDay::query()
+            ->where('day', '<=', now()->subDays((int) config("analytics.{$setting}"))->toDateString())
+            ->select('id');
+
+        SiteVisit::query()->whereIn('site_day_id', $olderThan('journey_days'))->delete();
+        SiteVisitorDay::query()->whereIn('site_day_id', $olderThan('returning_days'))->delete();
     }
 }

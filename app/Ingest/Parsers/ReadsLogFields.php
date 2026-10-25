@@ -23,13 +23,28 @@ trait ReadsLogFields
      */
     protected function time(string $format, string $value): ?CarbonImmutable
     {
+        $when = $this->readTime($format, $value);
+
+        return $when === null ? null : CarbonImmutable::instance($when)->utc();
+    }
+
+    /**
+     * The same timestamp as a Unix time, without building a Carbon instance.
+     */
+    protected function unixTime(string $format, string $value): ?int
+    {
+        return $this->readTime($format, $value)?->getTimestamp();
+    }
+
+    private function readTime(string $format, string $value): ?DateTimeImmutable
+    {
         $when = DateTimeImmutable::createFromFormat($format, $value);
 
         if ($when === false || DateTimeImmutable::getLastErrors() !== false) {
             return null;
         }
 
-        return CarbonImmutable::instance($when)->utc();
+        return $when;
     }
 
     /**

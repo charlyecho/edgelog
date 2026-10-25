@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Analytics\Geo\MmdbPlaces;
+use App\Analytics\Geo\Places;
 use App\Models\Site;
 use App\Models\Team;
 use Illuminate\Contracts\View\View as ViewContract;
@@ -16,7 +18,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->bind(Places::class, fn () => MmdbPlaces::fromConfig());
     }
 
     /**

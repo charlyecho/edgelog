@@ -94,6 +94,7 @@ class SiteController extends Controller
             'stripeEvents' => $site->hookEvents()->where('tool', IntegrationTool::Stripe)->latest('id')->limit(5)->get(),
             'otherTeams' => $otherTeams,
             'setup' => new ShipperSetup($site),
+            'lastDay' => $site->days()->latest('day')->first(),
         ]);
     }
 

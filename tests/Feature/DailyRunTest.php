@@ -148,6 +148,42 @@ class DailyRunTest extends TestCase
         ], $counts(CountKind::BotAgent));
     }
 
+    public function test_a_log_without_scripts_or_styles_still_tells_people_by_their_images(): void
+    {
+        $this->writeLog([
+            $this->line('2026-10-20 23:59:00', '198.51.100.1', '/', 'curl/8.5.0'),
+            // A person in an in-app browser: the server logs the images, not the styles.
+            $this->line('2026-10-21 10:00:00', '198.51.100.1', '/artist/book', self::CHROME, 'https://l.instagram.com/'),
+            $this->line('2026-10-21 10:00:01', '198.51.100.1', '/image/42.jpg', self::CHROME, 'https://example.com/artist/book'),
+            // A script that fetches the page alone.
+            $this->line('2026-10-21 11:00:00', '198.51.100.3', '/artist/book', self::CHROME),
+        ]);
+
+        $this->collect();
+
+        $day = $this->day();
+        $this->assertSame(DayStatus::Verified, $day->status, implode("\n", $day->problems ?? []));
+        $this->assertSame(0, $day->stylesheets);
+
+        $groups = $day->groups->keyBy(fn ($group) => $group->group->value);
+        $this->assertSame(['requests' => 2, 'views' => 1], $groups['people']->only('requests', 'views'));
+        $this->assertSame(['requests' => 1, 'views' => 1], $groups['bots']->only('requests', 'views'));
+    }
+
+    public function test_the_settings_warn_when_a_busy_day_logged_no_stylesheet(): void
+    {
+        $owner = User::factory()->create();
+        $this->site->team->members()->attach($owner, ['role' => 'owner']);
+        $edit = route('teams.sites.edit', [$this->site->team, $this->site]);
+        $day = $this->site->days()->create(['day' => '2026-10-21', 'timezone' => 'UTC', 'status' => DayStatus::Verified, 'hits' => 5000, 'stylesheets' => 0]);
+
+        $this->actingAs($owner)->get($edit)->assertOk()->assertSee('The log has no stylesheets');
+
+        $day->update(['stylesheets' => 12]);
+
+        $this->actingAs($owner)->get($edit)->assertOk()->assertDontSee('The log has no stylesheets');
+    }
+
     public function test_the_recount_withholds_a_day_that_was_counted_wrong(): void
     {
         $this->writeLog($this->referenceDay());

@@ -76,6 +76,7 @@
                 <nav class="grid gap-0.5">
                     @if ($railSite)
                         <x-rail-link :href="route('teams.sites.show', [$railTeam, $railSite])" icon="chart" :active="request()->routeIs('teams.sites.show', 'teams.sites.realtime')">{{ __('Overview') }}</x-rail-link>
+                        <x-rail-link :href="route('teams.sites.traffic.visitors', [$railTeam, $railSite])" icon="route" :active="request()->routeIs('teams.sites.traffic.*')">{{ __('Traffic') }}</x-rail-link>
                         @can('update', $railSite)
                             <x-rail-link :href="route('teams.sites.edit', [$railTeam, $railSite])" icon="sliders" :active="request()->routeIs('teams.sites.edit')">{{ __('Site settings') }}</x-rail-link>
                         @endcan

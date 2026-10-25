@@ -444,15 +444,16 @@ final class Recount
                             $pageTimes[] = $v['t'];
                         }
 
-                        if (preg_match(Patterns::RENDER_ASSET, $v['p']) || preg_match(Patterns::RSC_PAYLOAD, $v['u'])) {
-                            $drawTimes[] = $v['t'];
+                        $referrerHost = $v['r'] === '' ? '' : strtolower((string) parse_url($v['r'], PHP_URL_HOST));
+                        $ownFile = (preg_match(Patterns::ASSET, $v['p']) || preg_match(Patterns::RSC_PAYLOAD, $v['u']))
+                            && $referrerHost !== '' && in_array($referrerHost, $this->ownHosts, true);
+
+                        if ($ownFile) {
+                            $ownAssets++;
                         }
 
-                        $referrerHost = $v['r'] === '' ? '' : strtolower((string) parse_url($v['r'], PHP_URL_HOST));
-
-                        if ((preg_match(Patterns::ASSET, $v['p']) || preg_match(Patterns::RSC_PAYLOAD, $v['u']))
-                            && $referrerHost !== '' && in_array($referrerHost, $this->ownHosts, true)) {
-                            $ownAssets++;
+                        if ($ownFile || preg_match(Patterns::RENDER_ASSET, $v['p']) || preg_match(Patterns::RSC_PAYLOAD, $v['u'])) {
+                            $drawTimes[] = $v['t'];
                         }
 
                         $robots = $robots || preg_match(Patterns::CRAWLER_PATH, $v['p']);

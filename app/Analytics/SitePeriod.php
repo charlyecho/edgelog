@@ -8,9 +8,12 @@ use App\Enums\TrafficGroup;
 use App\Models\Site;
 use App\Models\SiteDay;
 use App\Models\SiteDayCount;
+use App\Models\SiteDayEngagement;
 use App\Models\SiteDayUser;
+use App\Models\SiteVisit;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonPeriod;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
 /**
@@ -211,6 +214,92 @@ final class SitePeriod
         }
 
         return $kept;
+    }
+
+    /**
+     * A breakdown over the verified days, every row, unsorted.
+     *
+     * @return array<string, int>
+     */
+    public function counts(CountKind $kind): array
+    {
+        return $this->counts[$kind->value] ?? [];
+    }
+
+    /**
+     * Determine if every verified day recorded its visits (days counted
+     * before visits were kept have none): a period's median from some of
+     * its days is not the period's median.
+     */
+    public function hasVisitFigures(): bool
+    {
+        return $this->hasFigures() && array_sum($this->counts(CountKind::VisitPages)) === $this->group(TrafficGroup::People)->readers;
+    }
+
+    /**
+     * Determine if every visit of the verified days was told new or returning.
+     */
+    public function hasReturningFigures(): bool
+    {
+        return $this->hasFigures() && array_sum($this->counts(CountKind::VisitorReturning)) === $this->group(TrafficGroup::People)->readers;
+    }
+
+    /**
+     * The visits of the verified days by source type or by device, summed,
+     * most visits first.
+     *
+     * @return array<string, array{visits: int, views: int, one_page: int, seconds: array<string, int>}>
+     */
+    public function engagement(string $dimension): array
+    {
+        $rows = [];
+
+        SiteDayEngagement::query()
+            ->whereIn('site_day_id', $this->verified()->pluck('id'))
+            ->where('dimension', $dimension)
+            ->get()
+            ->each(function (SiteDayEngagement $engagement) use (&$rows) {
+                $row = $rows[$engagement->name] ?? ['visits' => 0, 'views' => 0, 'one_page' => 0, 'seconds' => []];
+                $row['visits'] += $engagement->visits;
+                $row['views'] += $engagement->views;
+                $row['one_page'] += $engagement->one_page;
+
+                foreach ($engagement->seconds as $bucket => $visits) {
+                    $row['seconds'][$bucket] = ($row['seconds'][$bucket] ?? 0) + $visits;
+                }
+
+                $rows[$engagement->name] = $row;
+            });
+
+        uasort($rows, fn (array $a, array $b) => $b['visits'] <=> $a['visits']);
+
+        return $rows;
+    }
+
+    /**
+     * The kept visits of the verified days, newest first. Visits are kept
+     * analytics.journey_days, so a longer period reaches back only that far.
+     *
+     * @return Builder<SiteVisit>
+     */
+    public function visits(): Builder
+    {
+        return SiteVisit::query()
+            ->whereIn('site_day_id', $this->verified()->pluck('id'))
+            ->orderByDesc('started_at')
+            ->orderByDesc('id');
+    }
+
+    /**
+     * The days of the period that still have their visits, oldest first.
+     *
+     * @return list<string>
+     */
+    public function daysWithVisits(): array
+    {
+        $ids = SiteVisit::query()->whereIn('site_day_id', $this->verified()->pluck('id'))->distinct()->pluck('site_day_id')->flip();
+
+        return $this->verified()->filter(fn (SiteDay $day) => isset($ids[$day->id]))->keys()->values()->all();
     }
 
     /**
