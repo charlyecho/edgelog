@@ -64,8 +64,11 @@ class SiteController extends Controller
     {
         Gate::authorize('view', $site);
 
-        $choice = in_array($request->query('days'), SitePeriod::CHOICES, true) ? $request->query('days') : '30';
-        $period = SitePeriod::choose($site, $choice);
+        $choice = in_array($request->query('days'), [SitePeriod::TODAY, ...SitePeriod::CHOICES], true) ? $request->query('days') : '30';
+        $today = now($site->timezone)->startOfDay()->toImmutable();
+        $period = $choice === SitePeriod::TODAY
+            ? SitePeriod::live($site) ?? new SitePeriod($site, $today, $today)
+            : SitePeriod::choose($site, $choice);
 
         return view('sites.show', [
             'team' => $team,

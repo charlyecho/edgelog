@@ -15,6 +15,12 @@ namespace App\Analytics;
 final class Patterns
 {
     /**
+     * The site's own heartbeat: the request its server sends itself every
+     * five minutes (Site > Health). Always your own traffic.
+     */
+    public const string HEARTBEAT = '~^edgelog-heartbeat\b~i';
+
+    /**
      * Assistants fetching to train a model or build their own index: nobody waits on them.
      */
     public const string AI_TRAINING = '~GPTBot|ClaudeBot|Claude-SearchBot|CCBot|anthropic-ai|OAI-SearchBot'

@@ -75,11 +75,12 @@
 
                 <nav class="grid gap-0.5">
                     @if ($railSite)
-                        <x-rail-link :href="route('teams.sites.show', [$railTeam, $railSite])" icon="chart" :active="request()->routeIs('teams.sites.show', 'teams.sites.realtime')">{{ __('Overview') }}</x-rail-link>
+                        <x-rail-link :href="route('teams.sites.show', [$railTeam, $railSite])" icon="chart" :active="request()->routeIs('teams.sites.show', 'teams.sites.realtime', 'teams.sites.insights')">{{ __('Overview') }}</x-rail-link>
                         <x-rail-link :href="route('teams.sites.traffic.visitors', [$railTeam, $railSite])" icon="route" :active="request()->routeIs('teams.sites.traffic.*')">{{ __('Traffic') }}</x-rail-link>
                         <x-rail-link :href="route('teams.sites.sales.users', [$railTeam, $railSite])" icon="users" :active="request()->routeIs('teams.sites.sales.*')">{{ __('Leads & sales') }}</x-rail-link>
                         <x-rail-link :href="route('teams.sites.ai.assistants', [$railTeam, $railSite])" icon="sparkle" :active="request()->routeIs('teams.sites.ai.*')">{{ __('AI & bots') }}</x-rail-link>
                         <x-rail-link :href="route('teams.sites.security.exposed', [$railTeam, $railSite])" icon="shield" :active="request()->routeIs('teams.sites.security.*')">{{ __('Security') }}</x-rail-link>
+                        <x-rail-link :href="route('teams.sites.site.health', [$railTeam, $railSite])" icon="pulse" :active="request()->routeIs('teams.sites.site.*')">{{ __('Site') }}</x-rail-link>
                         @can('update', $railSite)
                             <x-rail-link :href="route('teams.sites.edit', [$railTeam, $railSite])" icon="sliders" :active="request()->routeIs('teams.sites.edit')">{{ __('Site settings') }}</x-rail-link>
                         @endcan

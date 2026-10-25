@@ -395,6 +395,10 @@ final class Recount
             || preg_match(Patterns::PROBE_QUERY, $line['u']));
         $id = $line['a']."\n".$ua;
 
+        if (preg_match(Patterns::HEARTBEAT, $ua)) {
+            return ['ours', '', false, false];
+        }
+
         $named = [
             [Patterns::AI_ASKED, 'answer_engines', 'asked'],
             [Patterns::AI_TRAINING, 'answer_engines', 'training'],

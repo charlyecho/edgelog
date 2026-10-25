@@ -6,6 +6,8 @@ use App\Analytics\Classification\Classifier;
 use App\Analytics\Classification\VisitEvidence;
 use App\Analytics\Crawlers\CrawlerCollector;
 use App\Analytics\Geo\Places;
+use App\Analytics\Health\HealthCollector;
+use App\Analytics\Health\QualityCollector;
 use App\Analytics\Security\SecurityCollector;
 use App\Analytics\Tally\DayTally;
 use App\Enums\ConversionAction;
@@ -45,6 +47,7 @@ final class DayCollector
             $ownPaths,
         );
 
+        $quality = new QualityCollector;
         $newest = PHP_INT_MIN;
         $lateness = 0;
         $stylesheets = 0;
@@ -53,6 +56,7 @@ final class DayCollector
             $time = $hit->when->getTimestamp();
             $newest = max($newest, $time);
             $lateness = max($lateness, $newest - $time);
+            $quality->add($hit);
 
             if ($hosts->covers($hit)) {
                 $evidence->add($hit);
@@ -70,6 +74,7 @@ final class DayCollector
 
         $security = new SecurityCollector($hosts->hosts, config('analytics.security'));
         $crawlers = new CrawlerCollector;
+        $health = new HealthCollector(new Sources($hosts->hosts), $notPages);
 
         foreach (TimeOrdered::of($reader->hits(), max(60, $lateness + 1)) as $hit) {
             if ($hosts->covers($hit)) {
@@ -77,6 +82,7 @@ final class DayCollector
                 $tally->add($hit, $verdict);
                 $security->add($hit, $verdict);
                 $crawlers->add($hit, $verdict);
+                $health->add($hit, $verdict);
             } else {
                 $tally->otherHost($hit->host);
                 $security->add($hit, null);
@@ -86,11 +92,13 @@ final class DayCollector
         $figures = $tally->finish();
         $security->finish($figures, $this->places);
         $crawlers->finish($figures);
+        $health->finish($figures, $reader->reachesBack ? $window->start : $figures->firstSeen, $window->end->min(now()->toImmutable()));
         ReturningVisitors::mark($site, $window->day, $figures);
         $this->addRevenue($site, $window, $figures);
         $figures->parsed = $reader->lines;
         $figures->unparsed = $reader->unparsed;
         $figures->stylesheets = $stylesheets;
+        $figures->quality = $quality->finish();
         $figures->partialFrom = $reader->reachesBack ? null : $figures->firstSeen;
 
         return $figures;

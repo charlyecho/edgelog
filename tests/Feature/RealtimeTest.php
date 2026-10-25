@@ -157,4 +157,29 @@ class RealtimeTest extends TestCase
         $this->travel(2)->minutes();
         $this->assertTrue(RefreshLiveSnapshot::latest($this->site)->asOf->greaterThan($first->asOf));
     }
+
+    public function test_the_summary_shows_today_so_far_without_storing_it(): void
+    {
+        $this->writeToday();
+        $viewer = User::factory()->create();
+        $this->site->team->members()->attach($viewer, ['role' => 'viewer']);
+
+        $this->actingAs($viewer)->get(route('teams.sites.show', [$this->site->team, $this->site, 'days' => 'today']))
+            ->assertOk()
+            ->assertSee('Today so far')
+            ->assertSee('3 visitors read 4 pages, which took 7 requests')
+            ->assertSee('so far today, not yet checked');
+
+        $this->assertSame(0, $this->site->days()->count());
+    }
+
+    public function test_the_summary_says_when_today_has_no_line_yet(): void
+    {
+        $viewer = User::factory()->create();
+        $this->site->team->members()->attach($viewer, ['role' => 'viewer']);
+
+        $this->actingAs($viewer)->get(route('teams.sites.show', [$this->site->team, $this->site, 'days' => 'today']))
+            ->assertOk()
+            ->assertSee('Nothing in today&#039;s log yet', false);
+    }
 }

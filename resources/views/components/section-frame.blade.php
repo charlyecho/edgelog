@@ -1,7 +1,7 @@
-@props(['team', 'site', 'current', 'title', 'period' => null, 'choice' => null, 'lede' => null, 'section' => 'traffic'])
+@props(['team', 'site', 'current', 'title', 'period' => null, 'choice' => null, 'lede' => null, 'section' => 'traffic', 'withoutFigures' => false])
 
-{{-- A tab of a section (Traffic, Security): the period bar, the tabs, the period line, its title, then its own content. --}}
-<x-layouts.app :title="match ($section) { 'security' => __('Security'), 'ai' => __('AI & bots'), 'sales' => __('Leads & sales'), default => __('Traffic') }">
+{{-- A tab of a section (Traffic, Security, Site): the period bar, the tabs, the period line, its title, then its own content. --}}
+<x-layouts.app :title="match ($section) { 'security' => __('Security'), 'ai' => __('AI & bots'), 'sales' => __('Leads & sales'), 'site' => __('Site'), default => __('Traffic') }">
     @if ($choice !== null)
         <x-slot:toolbar>
             <x-period-switch :current="$choice" />
@@ -21,7 +21,7 @@
         @endif
     </div>
 
-    @if ($period !== null && ! $period->hasFigures())
+    @if ($period !== null && ! $period->hasFigures() && ! $withoutFigures)
         <x-card :title="__('No figures yet')" :description="__('A day is counted once it is over where the site is, then counted a second time by the audit. Its figures show here only when both counts agree.')">
             <p class="text-ink-2">{{ __('The first figures appear the day after the site sends its first log lines.') }}</p>
         </x-card>

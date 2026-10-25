@@ -1,6 +1,11 @@
 @props(['team', 'site', 'current'])
 
+@php($keep = array_filter(['days' => request('days')]))
+
 <x-subtabs :current="$current" :tabs="[
-    'summary' => ['label' => __('Summary'), 'href' => route('teams.sites.show', [$team, $site])],
-    'realtime' => ['label' => __('Real time'), 'href' => route('teams.sites.realtime', [$team, $site])],
+    'health' => ['label' => __('Health'), 'href' => route('teams.sites.site.health', [$team, $site, ...$keep])],
+    'requests' => ['label' => __('Requests'), 'href' => route('teams.sites.site.requests', [$team, $site])],
+    'not-found' => ['label' => __('Not found'), 'href' => route('teams.sites.site.not-found', [$team, $site, ...$keep])],
+    'speed' => ['label' => __('Speed'), 'href' => route('teams.sites.site.speed', [$team, $site, ...$keep])],
+    'quality' => ['label' => __('Data quality'), 'href' => route('teams.sites.site.quality', [$team, $site, ...$keep])],
 ]" />

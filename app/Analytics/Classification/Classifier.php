@@ -15,6 +15,7 @@ use App\Ingest\LogHit;
  *
  *  0. a probe path or query is noted, not yet decisive (never under one of
  *     the site's own paths: OwnPaths)
+ *  1. the site's own heartbeat (Patterns::HEARTBEAT)  -> your own traffic, "heartbeat"
  *  3. an assistant fetching for a live question       -> AI assistants, asked
  *  4. an assistant crawling to train or index          -> AI assistants, training
  *  5. a link preview                                   -> bots, "link preview: <app>"
@@ -25,10 +26,15 @@ use App\Ingest\LogHit;
  * 10. a browser                                        -> people (cited, by the referrer or tag)
  * 11. anything left                                    -> bots
  *
- * (Rules 1 and 2, your own traffic, wait for the site's own lists.)
+ * (Rule 2, your own addresses, waits for the site's own list.)
  */
 final readonly class Classifier
 {
+    /**
+     * The name the site's own heartbeat is filed under, in your own traffic.
+     */
+    public const string HEARTBEAT = 'heartbeat';
+
     public function __construct(private VisitEvidence $evidence, private OwnPaths $ownPaths = new OwnPaths) {}
 
     public function classify(LogHit $hit): Verdict
@@ -38,6 +44,10 @@ final readonly class Classifier
         $probe = ! $this->ownPaths->matches($path) && (preg_match(Patterns::SECRET_PROBE, $path) === 1
             || preg_match(Patterns::SERVED_PROBE, $path) === 1
             || preg_match(Patterns::PROBE_QUERY, $hit->url) === 1);
+
+        if (preg_match(Patterns::HEARTBEAT, $agent) === 1) {
+            return new Verdict(TrafficGroup::Ours, self::HEARTBEAT);
+        }
 
         if (preg_match(Patterns::AI_ASKED, $agent, $name) === 1) {
             return new Verdict(TrafficGroup::AnswerEngines, $name[0], EngineTier::Asked, $probe);

@@ -2,6 +2,7 @@
 
 namespace App\Analytics;
 
+use App\Analytics\Health\HealthCollector;
 use App\Analytics\Tally\VisitJourneys;
 use App\Enums\CountKind;
 use App\Enums\TrafficGroup;
@@ -95,7 +96,40 @@ final class DayChecks
             }
         }
 
-        return [...$problems, ...self::visitProblems($figures), ...self::securityProblems($figures), ...self::crawlerProblems($figures)];
+        return [...$problems, ...self::visitProblems($figures), ...self::securityProblems($figures), ...self::crawlerProblems($figures), ...self::healthProblems($figures)];
+    }
+
+    /**
+     * The answers by status add up to the requests, people's page views by
+     * answer time to their page views, and the errors by page to their status.
+     *
+     * @return list<string>
+     */
+    private static function healthProblems(DayFigures $figures): array
+    {
+        $statuses = $figures->countsOf(CountKind::HealthStatus);
+        $people = TrafficGroup::People->value;
+        $serverErrors = array_sum(array_filter($statuses, fn (string $name) => str_ends_with($name, ':5xx'), ARRAY_FILTER_USE_KEY));
+        $speeds = $figures->countsOf(CountKind::HealthSpeed);
+        $problems = [];
+
+        foreach ([
+            CountKind::HealthStatus->value => $figures->hits,
+            CountKind::HealthSpeed->value => $figures->group(TrafficGroup::People)->views,
+            CountKind::HealthServerError->value => $serverErrors,
+            CountKind::HealthNotFound->value => $statuses["{$people}:404"] ?? 0,
+            CountKind::HealthNotFoundFrom->value => $statuses["{$people}:404"] ?? 0,
+            CountKind::HealthPageTimed->value => array_sum($speeds) - ($speeds[HealthCollector::NOT_LOGGED] ?? 0),
+            CountKind::HealthSlowPage->value => array_sum(array_intersect_key($speeds, array_flip(HealthCollector::SLOW))),
+        ] as $kind => $parent) {
+            $sum = array_sum($figures->counts[$kind] ?? []);
+
+            if ($sum !== $parent) {
+                $problems[] = __('The breakdown :kind adds up to :sum, not :parent.', ['kind' => $kind, 'sum' => $sum, 'parent' => $parent]);
+            }
+        }
+
+        return $problems;
     }
 
     /**

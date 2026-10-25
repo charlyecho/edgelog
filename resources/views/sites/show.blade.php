@@ -14,7 +14,8 @@
     $whole = $period->verified()->filter(fn ($day) => ! $day->isPartial())->count();
     $daily = fn (TrafficGroup $group, string $figure) => $period->daily(fn ($day) => SitePeriod::figureOf($day, $group, $figure));
     $perVisit = fn ($figures) => $figures->readers > 0 ? $figures->views / $figures->readers : 0;
-    $noEarlier = __('no whole period before to compare');
+    $live = $choice === SitePeriod::TODAY;
+    $noEarlier = $live ? __('so far today, not yet checked') : __('no whole period before to compare');
     $revenue = $period->revenue();
     $currency = array_key_first($revenue);
     $showRevenue = $currency !== null || $site->integrations()->exists();
@@ -52,17 +53,36 @@
 
 <x-layouts.app :title="__('Overview')">
     <x-slot:toolbar>
-        <x-button variant="secondary" size="sm" :href="route('teams.sites.realtime', [$team, $site])">
-            <span class="size-2 rounded-full border-2 border-good"></span> {{ __('Today') }} · {{ __('Live') }}
-        </x-button>
-        <x-period-switch :current="$choice" />
+        <x-period-switch :current="$choice" :today="true" />
     </x-slot:toolbar>
 
-    <x-site-tabs :team="$team" :site="$site" current="summary" />
+    <x-overview-tabs :team="$team" :site="$site" current="summary" />
 
-    <x-period-line :period="$period" />
+    @if ($live)
+        @php($todayDay = $period->days[$period->first->toDateString()] ?? null)
+        <div class="mb-3 flex flex-wrap items-center justify-between gap-3 text-[13px] text-ink-2" data-live-refresh="{{ SitePeriod::LIVE_SECONDS }}">
+            <p>
+                <span class="font-semibold text-ink">{{ __('Today so far') }}</span> ·
+                {{ __(':day, 00:00 to :time (:timezone): counted from the log now, with the same rules as the whole days. The audit checks it once the day is over.', [
+                    'day' => $period->first->translatedFormat('l j M'),
+                    'time' => ($todayDay?->last_seen ?? now())->setTimezone($site->timezone)->format('H:i'),
+                    'timezone' => $site->timezone,
+                ]) }}
+                <span data-live-state>{{ __('Refreshed every 2 minutes.') }}</span>
+            </p>
+            <button type="button" class="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-rule bg-surface px-3 font-semibold text-ink hover:border-ink-3" data-live-pause data-pause="{{ __('Pause') }}" data-resume="{{ __('Resume') }}" data-paused="{{ __('Paused.') }}" data-running="{{ __('Refreshed every 2 minutes.') }}">
+                {{ __('Pause') }}
+            </button>
+        </div>
+    @else
+        <x-period-line :period="$period" />
+    @endif
 
-    @if (! $period->hasFigures())
+    @if ($live && ! $period->hasFigures())
+        <x-card :title="__('Nothing in today\'s log yet')" :description="__('Today\'s figures appear here as soon as the site sends its first log lines of the day.')">
+            <p class="text-ink-2">{{ __('Whole days stay under the other periods.') }}</p>
+        </x-card>
+    @elseif (! $period->hasFigures())
         <x-card :title="__('No figures yet')" :description="__('A day is counted once it is over where the site is, then counted a second time by the audit. Its figures show here only when both counts agree.')">
             <p class="text-ink-2">
                 @can('update', $site)
@@ -168,7 +188,7 @@
                 {{ __('Server requests (every file: pages, images, scripts):') }} <span class="font-bold text-ink tabular-nums">{{ number_format($period->requests()) }}</span>.
             </p>
 
-            <details class="rounded-[10px] border border-rule bg-surface shadow-card">
+            <details @class(['rounded-[10px] border border-rule bg-surface shadow-card', 'hidden' => $live])>
                 <summary class="flex cursor-pointer items-center justify-between gap-3 px-4 py-3">
                     <span class="font-bold">{{ __('Each day, in numbers') }}</span>
                     <span class="text-[13px] text-ink-3">{{ __(':whole whole of :days', ['whole' => $whole, 'days' => $period->length()]) }}</span>

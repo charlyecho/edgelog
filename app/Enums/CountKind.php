@@ -56,6 +56,16 @@ enum CountKind: string
     case AiLikelyVisit = 'ai_likely_visit';
     case AiCitedReadFirst = 'ai_cited_read_first';
     case AiCitedLandedRead = 'ai_cited_landed_read';
+    case HealthStatus = 'health_status';
+    case HealthServerError = 'health_server_error';
+    case HealthNotFound = 'health_not_found';
+    case HealthSpeed = 'health_speed';
+    case HealthSlowPage = 'health_slow_page';
+    case HealthPost = 'health_post';
+    case HealthNotFoundFrom = 'health_not_found_from';
+    case HealthEngineNotFound = 'health_engine_not_found';
+    case HealthPageMs = 'health_page_ms';
+    case HealthPageTimed = 'health_page_timed';
 
     /**
      * The breakdowns of money, by currency (never added across currencies).
@@ -65,14 +75,15 @@ enum CountKind: string
     /**
      * The histograms a median is read from: every row kept, never folded.
      */
-    public const array UNFOLDED = ['visit_pages', 'visit_seconds', 'visit_hour'];
+    public const array UNFOLDED = ['visit_pages', 'visit_seconds', 'visit_hour', 'health_status', 'health_speed'];
 
     /**
      * Breakdowns that keep more rows than DayFigures::TOP before folding.
      *
      * @var array<string, int>
      */
-    public const array KEEP = ['crawler_path' => 2000, 'crawler_issue' => 1000];
+    public const array KEEP = ['crawler_path' => 2000, 'crawler_issue' => 1000, 'health_not_found_from' => 1000,
+        'health_page_ms' => 2000, 'health_page_timed' => 2000];
 
     /**
      * Where a city's country, name and region are joined in its row's name.
@@ -138,6 +149,16 @@ enum CountKind: string
             self::AiLikelyVisit => __('Visits likely sent by an AI answer'),
             self::AiCitedReadFirst => __('Visits from an AI answer whose assistant read pages first'),
             self::AiCitedLandedRead => __('Visits from an AI answer that landed on a page it read'),
+            self::HealthStatus => __('Responses by status, for each group'),
+            self::HealthServerError => __('Server errors by page'),
+            self::HealthNotFound => __('Pages people could not find'),
+            self::HealthSpeed => __('How fast people\'s pages were answered'),
+            self::HealthSlowPage => __('Slow pages'),
+            self::HealthPost => __('Form posts'),
+            self::HealthNotFoundFrom => __('Pages people could not find, by where they came from'),
+            self::HealthEngineNotFound => __('Missing pages crawlers and assistants hit'),
+            self::HealthPageMs => __('Server time spent on each page, in milliseconds'),
+            self::HealthPageTimed => __('Timed page views, by page'),
         };
     }
 
@@ -156,6 +177,8 @@ enum CountKind: string
             self::VisitStep => __('moves'),
             self::RevenuePaid, self::RevenueRefunded => __('in the currency\'s minor unit'),
             self::Payments => __('payments'),
+            self::HealthSpeed, self::HealthSlowPage, self::HealthPageTimed => __('page views'),
+            self::HealthPageMs => __('milliseconds'),
             default => __('requests'),
         };
     }

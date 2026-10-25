@@ -94,6 +94,21 @@ final class DayFigures
      */
     public array $crawlers = [];
 
+    /**
+     * The site's own heartbeat (HealthCollector): five-minute slots expected
+     * and answered, beats sent and failed, and the gaps; null when none came.
+     *
+     * @var ?array{expected: int, up: int, beats: int, failed: int, gaps: list<array{from: int, to: int, minutes: int}>}
+     */
+    public ?array $heartbeat = null;
+
+    /**
+     * What can be seen of the log being whole (QualityCollector).
+     *
+     * @var ?array{duplicates: int, short: int, silences: list<array{from: int, to: int, minutes: int}>}
+     */
+    public ?array $quality = null;
+
     public ?CarbonImmutable $firstSeen = null;
 
     public ?CarbonImmutable $lastSeen = null;

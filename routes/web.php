@@ -6,6 +6,8 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ShipperDownloadController;
 use App\Http\Controllers\SiteAiController;
 use App\Http\Controllers\SiteController;
+use App\Http\Controllers\SiteHealthController;
+use App\Http\Controllers\SiteInsightsController;
 use App\Http\Controllers\SiteIntegrationController;
 use App\Http\Controllers\SitePathsController;
 use App\Http\Controllers\SiteRealtimeController;
@@ -57,6 +59,7 @@ Route::middleware('auth')->group(function () {
             Route::post('/teams/{team}/sites', [SiteController::class, 'store'])->name('teams.sites.store');
             Route::get('/teams/{team}/sites/{site}', [SiteController::class, 'show'])->name('teams.sites.show');
             Route::get('/teams/{team}/sites/{site}/realtime', SiteRealtimeController::class)->name('teams.sites.realtime');
+            Route::get('/teams/{team}/sites/{site}/insights', SiteInsightsController::class)->name('teams.sites.insights');
             Route::get('/teams/{team}/sites/{site}/traffic/visitors', [SiteTrafficController::class, 'visitors'])->name('teams.sites.traffic.visitors');
             Route::get('/teams/{team}/sites/{site}/traffic/sources', [SiteTrafficController::class, 'sources'])->name('teams.sites.traffic.sources');
             Route::get('/teams/{team}/sites/{site}/traffic/pages', [SiteTrafficController::class, 'pages'])->name('teams.sites.traffic.pages');
@@ -82,6 +85,11 @@ Route::middleware('auth')->group(function () {
             Route::get('/teams/{team}/sites/{site}/security/fake', [SiteSecurityController::class, 'fake'])->name('teams.sites.security.fake');
             Route::get('/teams/{team}/sites/{site}/security/block', [SiteSecurityController::class, 'block'])->name('teams.sites.security.block');
             Route::get('/teams/{team}/sites/{site}/security/block/{format}', [SiteSecurityController::class, 'export'])->name('teams.sites.security.block.export');
+            Route::get('/teams/{team}/sites/{site}/site/health', [SiteHealthController::class, 'health'])->name('teams.sites.site.health');
+            Route::get('/teams/{team}/sites/{site}/site/requests', [SiteHealthController::class, 'requests'])->name('teams.sites.site.requests');
+            Route::get('/teams/{team}/sites/{site}/site/not-found', [SiteHealthController::class, 'notFound'])->name('teams.sites.site.not-found');
+            Route::get('/teams/{team}/sites/{site}/site/speed', [SiteHealthController::class, 'speed'])->name('teams.sites.site.speed');
+            Route::get('/teams/{team}/sites/{site}/site/quality', [SiteHealthController::class, 'quality'])->name('teams.sites.site.quality');
             Route::get('/teams/{team}/sites/{site}/settings', [SiteController::class, 'edit'])->name('teams.sites.edit');
             Route::put('/teams/{team}/sites/{site}', [SiteController::class, 'update'])->name('teams.sites.update');
             Route::delete('/teams/{team}/sites/{site}', [SiteController::class, 'destroy'])->name('teams.sites.destroy');

@@ -5,6 +5,18 @@
         @case('chart')
             <path d="M3 3v18h18" /><path d="M7 16v-4" /><path d="M12 16V8" /><path d="M17 16v-7" />
             @break
+        @case('trend-up')
+            <path d="m3 17 6-6 4 4 8-8" /><path d="M14 7h7v7" />
+            @break
+        @case('trend-down')
+            <path d="m3 7 6 6 4-4 8 8" /><path d="M14 17h7v-7" />
+            @break
+        @case('minus')
+            <circle cx="12" cy="12" r="9" /><path d="M8 12h8" />
+            @break
+        @case('pulse')
+            <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+            @break
         @case('shield')
             <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
             @break

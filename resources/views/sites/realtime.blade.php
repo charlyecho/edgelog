@@ -20,7 +20,7 @@
         <x-button variant="secondary" size="sm" :href="route('teams.sites.show', [$team, $site])">{{ __('Whole days') }}</x-button>
     </x-slot:toolbar>
 
-    <x-site-tabs :team="$team" :site="$site" current="realtime" />
+    <x-overview-tabs :team="$team" :site="$site" current="realtime" />
 
     <div class="mb-3 flex flex-wrap items-center justify-between gap-3 text-[13px] text-ink-2" data-live-refresh="120">
         <p>
