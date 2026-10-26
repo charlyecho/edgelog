@@ -7,6 +7,7 @@ use App\Http\Controllers\ShipperDownloadController;
 use App\Http\Controllers\SiteAiController;
 use App\Http\Controllers\SiteController;
 use App\Http\Controllers\SiteHealthController;
+use App\Http\Controllers\SiteIconController;
 use App\Http\Controllers\SiteInsightsController;
 use App\Http\Controllers\SiteIntegrationController;
 use App\Http\Controllers\SitePathsController;
@@ -95,6 +96,10 @@ Route::middleware('auth')->group(function () {
             Route::delete('/teams/{team}/sites/{site}', [SiteController::class, 'destroy'])->name('teams.sites.destroy');
             Route::put('/teams/{team}/sites/{site}/integrations/stripe', [SiteIntegrationController::class, 'update'])->name('teams.sites.stripe.update');
             Route::delete('/teams/{team}/sites/{site}/integrations/stripe', [SiteIntegrationController::class, 'destroy'])->name('teams.sites.stripe.destroy');
+            Route::get('/teams/{team}/sites/{site}/icon', [SiteIconController::class, 'show'])->name('teams.sites.icon');
+            Route::post('/teams/{team}/sites/{site}/icon', [SiteIconController::class, 'store'])->name('teams.sites.icon.store');
+            Route::post('/teams/{team}/sites/{site}/icon/fetch', [SiteIconController::class, 'fetch'])->name('teams.sites.icon.fetch');
+            Route::delete('/teams/{team}/sites/{site}/icon', [SiteIconController::class, 'destroy'])->name('teams.sites.icon.destroy');
             Route::put('/teams/{team}/sites/{site}/paths', [SitePathsController::class, 'update'])->name('teams.sites.paths.update');
             Route::post('/teams/{team}/sites/{site}/token', [SiteTokenController::class, 'store'])->name('teams.sites.token.store');
             Route::put('/teams/{team}/sites/{site}/team', [SiteTeamController::class, 'update'])->name('teams.sites.team.update');

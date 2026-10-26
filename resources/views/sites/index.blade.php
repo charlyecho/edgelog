@@ -20,7 +20,7 @@
                 @php($known = array_filter($days, fn ($value) => $value !== null))
                 <a href="{{ route('teams.sites.show', [$team, $site]) }}" class="block rounded-[10px] border border-rule bg-surface p-4 no-underline shadow-card hover:border-gap">
                     <span class="flex items-center gap-3">
-                        <x-tile :label="$site->name" :seed="$site->uuid" size="size-9 text-lg" />
+                        <x-tile :label="$site->name" :seed="$site->uuid" :src="$site->iconUrl($team)" size="size-9 text-lg" />
                         <span class="min-w-0">
                             <span class="block truncate font-bold">{{ $site->name }}</span>
                             <span class="block truncate text-[13px] text-ink-3">{{ $site->url }}</span>

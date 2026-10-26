@@ -17,7 +17,7 @@
                 <details class="relative mb-3">
                     <summary class="flex min-h-[52px] cursor-pointer list-none items-center gap-2.5 rounded-[10px] border border-rule bg-surface px-2.5 py-2 hover:border-gap">
                         @if ($railSite)
-                            <x-tile :label="$railSite->name" :seed="$railSite->uuid" size="size-8 text-base" />
+                            <x-tile :label="$railSite->name" :seed="$railSite->uuid" :src="$railSite->iconUrl($railTeam)" size="size-8 text-base" />
                             <span class="flex min-w-0 flex-col leading-tight">
                                 <span class="truncate text-[15px] font-bold">{{ $railSite->name }}</span>
                                 <span class="truncate text-xs text-ink-3">{{ $railTeam->name }}</span>
@@ -38,7 +38,7 @@
                                 'flex min-h-10 items-center gap-2.5 rounded-lg px-2 no-underline hover:bg-sunk',
                                 'bg-sunk font-semibold' => $site->is($railSite),
                             ])>
-                                <x-tile :label="$site->name" :seed="$site->uuid" />
+                                <x-tile :label="$site->name" :seed="$site->uuid" :src="$site->iconUrl($railTeam)" />
                                 <span class="min-w-0 truncate">{{ $site->name }}</span>
                                 @if ($site->is($railSite))
                                     <x-icon name="check" class="ml-auto" />

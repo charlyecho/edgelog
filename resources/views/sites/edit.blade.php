@@ -33,6 +33,50 @@
             </x-slot:after>
         </x-card>
 
+        <x-card :title="__('Icon')" :description="__('Shown next to the site\'s name. It is read from the site when the site is added, or you can upload one.')">
+            <div class="flex flex-wrap items-center gap-4">
+                <x-tile :label="$site->name" :seed="$site->uuid" :src="$site->iconUrl($team)" size="size-12 text-xl" />
+                <p class="text-ink-2">
+                    @if ($site->icon_path === null)
+                        {{ __('No icon: the site is shown with its initial.') }}
+                    @elseif ($site->icon_uploaded)
+                        {{ __('Uploaded :when.', ['when' => $site->icon_changed_at->diffForHumans()]) }}
+                    @else
+                        {{ __('Read from the site :when.', ['when' => $site->icon_changed_at->diffForHumans()]) }}
+                    @endif
+                </p>
+            </div>
+
+            <form method="POST" action="{{ route('teams.sites.icon.store', [$team, $site]) }}" enctype="multipart/form-data" class="mt-4 grid gap-1.5">
+                @csrf
+                <label class="grid gap-1.5 text-[13px] font-medium text-ink-2">
+                    {{ __('Upload an icon') }}
+                    <span class="flex flex-wrap items-center gap-3">
+                        <input type="file" name="icon" accept=".png,.jpg,.jpeg,.gif,.webp,.svg,.ico" required class="min-w-0 flex-1 text-[13px] font-normal text-ink file:mr-3 file:h-8 file:cursor-pointer file:rounded-lg file:border file:border-rule file:bg-surface file:px-3 file:text-[13px] file:font-semibold file:text-ink hover:file:border-ink-3">
+                        <x-button variant="secondary" size="sm">{{ __('Upload') }}</x-button>
+                    </span>
+                    <span class="text-xs font-normal text-ink-3">{{ __('PNG, JPEG, GIF, WebP, SVG or ICO, :size KB at most. A square image of 64 pixels or more looks best.', ['size' => \App\Models\Site::ICON_MAX_BYTES / 1024]) }}</span>
+                    @error('icon')
+                        <span class="text-[13px] font-normal text-bad">{{ $message }}</span>
+                    @enderror
+                </label>
+            </form>
+
+            <div class="mt-4 flex flex-wrap gap-2 border-t border-grid pt-4">
+                <form method="POST" action="{{ route('teams.sites.icon.fetch', [$team, $site]) }}" @if ($site->icon_uploaded) onsubmit="return confirm(@js(__('Read the icon from the site? It replaces the uploaded one.')))" @endif>
+                    @csrf
+                    <x-button variant="secondary" size="sm">{{ __('Read from the site') }}</x-button>
+                </form>
+                @if ($site->icon_path !== null)
+                    <form method="POST" action="{{ route('teams.sites.icon.destroy', [$team, $site]) }}">
+                        @csrf
+                        @method('DELETE')
+                        <x-button variant="danger" size="sm">{{ __('Remove the icon') }}</x-button>
+                    </form>
+                @endif
+            </div>
+        </x-card>
+
         <x-card :title="__('Paths')" :description="__('Two lists that change how requests are counted: one path per line, * stands for any characters.')">
             <form method="POST" action="{{ route('teams.sites.paths.update', [$team, $site]) }}" class="grid gap-4">
                 @csrf

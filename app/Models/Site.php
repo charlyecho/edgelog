@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 #[Fillable(['name', 'url', 'log_format', 'timezone', 'not_pages', 'own_paths'])]
@@ -61,6 +62,38 @@ class Site extends Model
     public const string TOKEN_PREFIX = 'edg_';
 
     /**
+     * The image types an icon can be, by the type read from its bytes.
+     *
+     * @var array<string, string>
+     */
+    public const array ICON_TYPES = [
+        'image/png' => 'png',
+        'image/jpeg' => 'jpg',
+        'image/gif' => 'gif',
+        'image/webp' => 'webp',
+        'image/svg+xml' => 'svg',
+        'image/vnd.microsoft.icon' => 'ico',
+        'image/x-icon' => 'ico',
+    ];
+
+    /**
+     * The largest icon kept, in bytes.
+     */
+    public const int ICON_MAX_BYTES = 512 * 1024;
+
+    /**
+     * Delete the site's icon file along with the site.
+     */
+    protected static function booted(): void
+    {
+        static::deleted(function (Site $site) {
+            if ($site->icon_path !== null) {
+                Storage::disk('local')->delete($site->icon_path);
+            }
+        });
+    }
+
+    /**
      * The model's default values for attributes.
      *
      * @var array<string, mixed>
@@ -89,6 +122,8 @@ class Site extends Model
     {
         return [
             'token_generated_at' => 'datetime',
+            'icon_uploaded' => 'boolean',
+            'icon_changed_at' => 'datetime',
             'log_format' => LogFormat::class,
             'not_pages' => 'array',
             'own_paths' => 'array',
@@ -171,6 +206,65 @@ class Site extends Model
     public function host(): string
     {
         return parse_url($this->url, PHP_URL_HOST) ?: $this->url;
+    }
+
+    /**
+     * Get the address the site's icon is shown from, or null when it has none.
+     */
+    public function iconUrl(Team $team): ?string
+    {
+        return $this->icon_path === null ? null : route('teams.sites.icon', [$team, $this, 'v' => $this->icon_changed_at?->timestamp]);
+    }
+
+    /**
+     * Keep an image as the site's icon, in place of the previous one.
+     *
+     * Returns false, keeping the previous icon, when the bytes are not an image of a known type.
+     */
+    public function storeIcon(string $contents, bool $uploaded): bool
+    {
+        $extension = self::iconExtension($contents);
+
+        if ($extension === null) {
+            return false;
+        }
+
+        $path = "site-icons/{$this->uuid}.{$extension}";
+        Storage::disk('local')->put($path, $contents);
+
+        if ($this->icon_path !== null && $this->icon_path !== $path) {
+            Storage::disk('local')->delete($this->icon_path);
+        }
+
+        $this->forceFill(['icon_path' => $path, 'icon_uploaded' => $uploaded, 'icon_changed_at' => now()])->save();
+
+        return true;
+    }
+
+    /**
+     * Delete the site's icon: it is shown with its initial again.
+     */
+    public function forgetIcon(): void
+    {
+        if ($this->icon_path !== null) {
+            Storage::disk('local')->delete($this->icon_path);
+        }
+
+        $this->forceFill(['icon_path' => null, 'icon_uploaded' => false, 'icon_changed_at' => now()])->save();
+    }
+
+    /**
+     * Get the extension of an icon's image type, read from its bytes, or null when it is not one.
+     */
+    public static function iconExtension(string $contents): ?string
+    {
+        if ($contents === '' || strlen($contents) > self::ICON_MAX_BYTES) {
+            return null;
+        }
+
+        $type = (new \finfo(FILEINFO_MIME_TYPE))->buffer($contents);
+
+        return self::ICON_TYPES[$type] ?? null;
     }
 
     /**

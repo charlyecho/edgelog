@@ -7,6 +7,7 @@ use App\Jobs\AuditSiteDay;
 use App\Jobs\CheckStack;
 use App\Jobs\CollectSiteDay;
 use App\Jobs\FetchRobotsTxt;
+use App\Jobs\FetchSiteIcon;
 use App\Jobs\FetchSitemap;
 use App\Models\Site;
 use App\Models\SiteDay;
@@ -46,7 +47,12 @@ class RunDailyCommand extends Command
                 return;
             }
 
-            Bus::chain([new FetchRobotsTxt($site), new FetchSitemap($site), new CheckStack($site)])->dispatch();
+            Bus::chain(array_filter([
+                new FetchRobotsTxt($site),
+                new FetchSitemap($site),
+                new CheckStack($site),
+                $site->icon_path === null ? new FetchSiteIcon($site) : null,
+            ]))->dispatch();
 
             Bus::chain([new CollectSiteDay($site, $window->day), new AuditSiteDay($site, $window->day)])->dispatch();
             $queued++;

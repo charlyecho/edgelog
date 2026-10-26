@@ -7,6 +7,7 @@ use App\Analytics\SiteSparklines;
 use App\Enums\IntegrationTool;
 use App\Http\Requests\SaveSiteRequest;
 use App\Ingest\ShipperSetup;
+use App\Jobs\FetchSiteIcon;
 use App\Jobs\RefreshToday;
 use App\Models\Site;
 use App\Models\Team;
@@ -44,13 +45,15 @@ class SiteController extends Controller
     }
 
     /**
-     * Add a site to the team and show its token once.
+     * Add a site to the team, show its token once and read its icon.
      */
     public function store(SaveSiteRequest $request, Team $team): RedirectResponse
     {
         $site = $team->sites()->make($request->siteAttributes());
         $token = $site->fillNewToken();
         $site->save();
+
+        FetchSiteIcon::dispatch($site);
 
         return redirect()
             ->route('teams.sites.edit', [$team, $site])
@@ -105,11 +108,15 @@ class SiteController extends Controller
     }
 
     /**
-     * Change the site's name and URL.
+     * Change the site's name and URL; a new URL reads the site's icon again.
      */
     public function update(SaveSiteRequest $request, Team $team, Site $site): RedirectResponse
     {
         $site->update($request->siteAttributes());
+
+        if ($site->wasChanged('url')) {
+            FetchSiteIcon::dispatch($site);
+        }
 
         return back()->with('status', __('Site saved.'));
     }
