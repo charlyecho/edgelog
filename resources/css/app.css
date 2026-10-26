@@ -28,6 +28,14 @@
     --series-visitors: #2a78d6;
     --series-pages: #008300;
     --series-revenue: #b02a86;
+    /* The world map: no count, then five shades of the people colour; the live bubble. */
+    --map-0: #dfe5eb;
+    --map-1: #a9c8f0;
+    --map-2: #74a6e6;
+    --map-3: #2a78d6;
+    --map-4: #1d5aa6;
+    --map-5: #123d73;
+    --map-live: #1b8f65;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -54,6 +62,13 @@
         --series-visitors: #3987e5;
         --series-pages: #2fa52f;
         --series-revenue: #d55aae;
+        --map-0: #26313c;
+        --map-1: #1d4a80;
+        --map-2: #2a6bbd;
+        --map-3: #3987e5;
+        --map-4: #74aaf0;
+        --map-5: #b5d2f7;
+        --map-live: #2fbf8a;
     }
 }
 
@@ -91,5 +106,111 @@
 
     details > summary::-webkit-details-marker {
         display: none;
+    }
+}
+
+/* The world map (components/charts/world-map.blade.php). */
+@layer components {
+    .map-c {
+        fill: var(--map-0);
+        stroke: var(--surface);
+        stroke-width: 0.6;
+        stroke-linejoin: round;
+    }
+
+    .map-c.s1 { fill: var(--map-1); }
+    .map-c.s2 { fill: var(--map-2); }
+    .map-c.s3 { fill: var(--map-3); }
+    .map-c.s4 { fill: var(--map-4); }
+    .map-c.s5 { fill: var(--map-5); }
+
+    .map-c[tabindex] {
+        cursor: default;
+        outline: none;
+    }
+
+    .map-c[tabindex]:hover,
+    .map-c[tabindex]:focus-visible {
+        stroke: var(--ink);
+        stroke-width: 1.2;
+    }
+
+    .map-bubbles {
+        pointer-events: none;
+    }
+
+    .map-bubble {
+        fill: var(--map-live);
+        fill-opacity: 0.9;
+        stroke: var(--surface);
+        stroke-width: 2;
+    }
+
+    .map-ring {
+        fill: var(--map-live);
+        fill-opacity: 0.28;
+        stroke: var(--map-live);
+        stroke-width: 2.5;
+        transform-box: fill-box;
+        transform-origin: center;
+        transform: scale(1.9);
+        opacity: 0.45;
+    }
+
+    .map-ring-late {
+        display: none;
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+        .map-bubble {
+            animation: map-blink 1.6s ease-in-out infinite;
+        }
+
+        .map-ring {
+            animation: map-ping 2s ease-out infinite;
+        }
+
+        .map-ring-late {
+            display: inline;
+            animation-delay: 1s;
+        }
+    }
+
+    .map-swatch {
+        display: inline-block;
+        width: 14px;
+        height: 10px;
+        border-radius: 2px;
+        background: var(--map-0);
+    }
+
+    .map-swatch.s1 { background: var(--map-1); }
+    .map-swatch.s2 { background: var(--map-2); }
+    .map-swatch.s3 { background: var(--map-3); }
+    .map-swatch.s4 { background: var(--map-4); }
+    .map-swatch.s5 { background: var(--map-5); }
+
+    .map-swatch-live {
+        width: 10px;
+        border-radius: 50%;
+        background: var(--map-live);
+    }
+}
+
+@keyframes map-ping {
+    from {
+        transform: scale(1);
+        opacity: 0.9;
+    }
+
+    to {
+        transform: scale(3.2);
+        opacity: 0;
+    }
+}
+
+@keyframes map-blink {
+    50% {
+        fill-opacity: 0.55;
     }
 }

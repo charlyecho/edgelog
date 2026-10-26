@@ -69,7 +69,15 @@
             </section>
         </div>
 
-        <div class="grid gap-4 lg:grid-cols-2">
+        <div class="grid items-start gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
+            <section class="rounded-[10px] border border-rule bg-surface p-4 shadow-card">
+                <h3 class="text-[14px] font-bold">{{ __('Where visitors are') }}</h3>
+                <p class="mb-2 text-xs text-ink-3">{{ __('countries shaded by visits today; a pulsing bubble on each country with someone active in the last 30 minutes') }}</p>
+                <x-charts.world-map :countries="collect($live->countries)->map(fn ($figures) => ['count' => $figures['today'], 'active' => $figures['recent']])->all()"
+                    :label="__('World map: visits today by country, and the countries with visitors active in the last 30 minutes')"
+                    :legend="__('Visits today')" :count="__(':count visit today|:count visits today')" :active="__(':count active in the last 30 minutes|:count active in the last 30 minutes')" live />
+            </section>
+
             <section class="rounded-[10px] border border-rule bg-surface p-4 shadow-card">
                 <h3 class="text-[14px] font-bold">{{ __('By country') }}</h3>
                 <p class="mb-2 text-xs text-ink-3">{{ __('visits today, and how many were active in the last 30 minutes') }}</p>
@@ -100,8 +108,6 @@
                     <x-geoip-credit class="mt-1" />
                 @endif
             </section>
-
-            <x-top-list :title="__('Pages being read')" :unit="__('page views by visitors in the last 30 minutes (:count)', ['count' => $live->pagesRecent])" :rows="$pages" :total="$live->pagesRecent" :shown="8" />
         </div>
 
         <div class="grid items-start gap-4 lg:grid-cols-2">
@@ -137,6 +143,7 @@
             </section>
 
             <div class="grid gap-4">
+                <x-top-list :title="__('Pages being read')" :unit="__('page views by visitors in the last 30 minutes (:count)', ['count' => $live->pagesRecent])" :rows="$pages" :total="$live->pagesRecent" :shown="8" />
                 <x-top-list :title="__('Sources now')" :unit="__('visitors active in the last 30 minutes, by where they came from')" :rows="$sources" :total="$live->recentVisitors" :shown="8" />
                 <x-top-list :title="__('Devices now')" :unit="__('visitors active in the last 30 minutes, by device')" :rows="$devices" :total="$live->recentVisitors" />
 

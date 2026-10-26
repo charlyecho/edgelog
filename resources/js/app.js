@@ -89,6 +89,43 @@ document.querySelectorAll('[data-top-list]').forEach((list) => {
 });
 
 /**
+ * The world map's tooltip: a country's name and figures, under the pointer
+ * or above the country that has the keyboard focus.
+ */
+document.querySelectorAll('[data-world-map]').forEach((figure) => {
+    const tooltip = figure.querySelector('[data-tooltip]');
+    const land = figure.querySelector('.map-land');
+
+    const show = (country, clientX, clientY) => {
+        const box = figure.getBoundingClientRect();
+        tooltip.querySelector('[data-tooltip-name]').textContent = country.dataset.name;
+        tooltip.querySelector('[data-tooltip-detail]').textContent = country.dataset.detail;
+        tooltip.classList.remove('hidden');
+        const left = Math.min(Math.max(clientX - box.left + 12, 0), box.width - tooltip.offsetWidth);
+        const top = clientY - box.top - tooltip.offsetHeight - 10;
+        tooltip.style.left = `${left}px`;
+        tooltip.style.top = `${top < 0 ? clientY - box.top + 16 : top}px`;
+    };
+    const hide = () => tooltip.classList.add('hidden');
+    const countryOf = (event) => event.target.closest?.('[data-name]');
+
+    land.addEventListener('pointermove', (event) => {
+        const country = countryOf(event);
+        country ? show(country, event.clientX, event.clientY) : hide();
+    });
+    land.addEventListener('pointerleave', hide);
+    land.addEventListener('focusin', (event) => {
+        const country = countryOf(event);
+
+        if (country) {
+            const box = country.getBoundingClientRect();
+            show(country, box.left + box.width / 2, box.top);
+        }
+    });
+    land.addEventListener('focusout', hide);
+});
+
+/**
  * The Real time tab reloads itself every few minutes, unless the reader paused it.
  */
 document.querySelectorAll('[data-live-refresh]').forEach((bar) => {

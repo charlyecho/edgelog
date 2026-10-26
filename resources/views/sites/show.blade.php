@@ -158,6 +158,14 @@
                 </x-card>
             @endif
 
+            @if ($live && $liveCountries)
+                <x-card :title="__('Where visitors are')" :description="__('Shaded by visits today. A pulsing bubble on each country with someone on the site in the last 30 minutes.')">
+                    <x-charts.world-map :countries="collect($liveCountries)->map(fn ($figures) => ['count' => $figures['today'], 'active' => $figures['recent']])->all()"
+                        :label="__('World map: visits today by country, and the countries with visitors active in the last 30 minutes')"
+                        :legend="__('Visits today')" :count="__(':count visit today|:count visits today')" :active="__(':count active in the last 30 minutes|:count active in the last 30 minutes')" live />
+                </x-card>
+            @endif
+
             <div class="grid gap-4 lg:grid-cols-2">
                 <x-top-list :title="__('Countries')" :unit="__('visitors')" :rows="$countries" :total="$people->readers">
                     <x-geoip-credit class="mt-2" />

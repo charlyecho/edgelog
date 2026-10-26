@@ -109,6 +109,7 @@ class RealtimeTest extends TestCase
             ->get(route('teams.sites.realtime', [$this->site->team, $this->site]))
             ->assertOk()
             ->assertSee('Active now')
+            ->assertSee('Where visitors are')
             ->assertSee('/blog/')
             ->assertSee('from chatgpt.com')
             ->assertSee('ChatGPT-User');
@@ -215,6 +216,7 @@ class RealtimeTest extends TestCase
         $this->actingAs($viewer)->get(route('teams.sites.show', [$this->site->team, $this->site, 'days' => 'today']))
             ->assertOk()
             ->assertSee('Today so far')
+            ->assertSee('Where visitors are')
             ->assertSee('3 visitors read 4 pages, which took 7 requests')
             ->assertSee('so far today, not yet checked');
 
