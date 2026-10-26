@@ -2,6 +2,7 @@
 
 namespace App\Ingest;
 
+use App\Ingest\Parsers\LogLineParser;
 use App\Models\Site;
 use Closure;
 use RuntimeException;
@@ -64,6 +65,66 @@ final readonly class IngestLog
     public function path(): string
     {
         return "{$this->folder}/".self::BASE;
+    }
+
+    /**
+     * Every file of the log, oldest first: access.log.<keep>.gz ... access.log.1, access.log.
+     *
+     * @return list<string>
+     */
+    public function files(): array
+    {
+        $base = $this->path();
+        $files = [];
+
+        foreach (glob("{$base}.*.gz") ?: [] as $path) {
+            if (preg_match('/\.(\d+)\.gz$/', $path, $number) === 1) {
+                $files[(int) $number[1]] = $path;
+            }
+        }
+
+        if (is_file("{$base}.1")) {
+            $files[1] = "{$base}.1";
+        }
+
+        if (is_file($base)) {
+            $files[0] = $base;
+        }
+
+        krsort($files);
+
+        return array_values($files);
+    }
+
+    /**
+     * The time of the first line still kept, as a Unix timestamp, or null
+     * when nothing is: the shipped lines begin there, so an older line can
+     * only come from the past logs.
+     */
+    public function firstLineTime(LogLineParser $parser): ?int
+    {
+        foreach ($this->files() as $file) {
+            $gzip = str_ends_with($file, '.gz');
+            $handle = $gzip ? gzopen($file, 'rb') : fopen($file, 'rb');
+
+            if ($handle === false) {
+                continue;
+            }
+
+            try {
+                while (($line = $gzip ? gzgets($handle) : fgets($handle)) !== false) {
+                    $timestamp = trim($line) === '' ? null : $parser->timestamp($line);
+
+                    if ($timestamp !== null) {
+                        return $timestamp;
+                    }
+                }
+            } finally {
+                $gzip ? gzclose($handle) : fclose($handle);
+            }
+        }
+
+        return null;
     }
 
     /**

@@ -21,4 +21,12 @@ class ShipperScriptTest extends TestCase
         $this->assertSame(2, $result->exitCode());
         $this->assertStringContainsString('must start with https://', $result->errorOutput());
     }
+
+    public function test_the_backfill_needs_the_past_files(): void
+    {
+        $result = Process::run(['sh', base_path('tools/edgelog-ship'), '--url', 'https://example.com/ingest/x', '--token-file', '/dev/null', '--backfill']);
+
+        $this->assertSame(2, $result->exitCode());
+        $this->assertStringContainsString('--backfill needs the past log files', $result->errorOutput());
+    }
 }

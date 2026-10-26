@@ -15,6 +15,9 @@ enum IngestRefusalReason: string
     case BadBody = 'bad_body';
     case BadEncoding = 'bad_encoding';
     case TooLarge = 'too_large';
+    case BadRange = 'bad_range';
+    case NoLiveLog = 'no_live_log';
+    case Offset = 'offset';
 
     /**
      * Get the HTTP status the endpoint answers with.
@@ -26,7 +29,8 @@ enum IngestRefusalReason: string
             self::WrongSite => 403,
             self::RateLimited, self::DayFull, self::TeamLimit => 429,
             self::Disk => 507,
-            self::BadBatch, self::BadBody => 400,
+            self::BadBatch, self::BadBody, self::BadRange => 400,
+            self::NoLiveLog, self::Offset => 409,
             self::BadEncoding => 415,
             self::TooLarge => 413,
         };
@@ -49,6 +53,9 @@ enum IngestRefusalReason: string
             self::BadBody => __('The gzip body could not be read.'),
             self::BadEncoding => __('Send the body plain or with Content-Encoding: gzip.'),
             self::TooLarge => __('A batch is at most 5 MiB, packed and unpacked.'),
+            self::BadRange => __('X-Edgelog-Range: <file id>:<start>-<end> is needed.'),
+            self::NoLiveLog => __('Nothing was shipped live for this site yet. Start the shipper first, then send the past logs: the first line it shipped tells which past lines are new.'),
+            self::Offset => __('This part of the file is not the one expected; the answer says where to go on from.'),
         };
     }
 }

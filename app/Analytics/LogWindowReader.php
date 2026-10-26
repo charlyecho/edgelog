@@ -2,15 +2,16 @@
 
 namespace App\Analytics;
 
+use App\Ingest\HistoryLog;
 use App\Ingest\IngestLog;
 use App\Ingest\LogHit;
 use App\Ingest\Parsers\LogLineParser;
 use Generator;
 
 /**
- * Reads the lines of a window from a site's shipped log files: today's
- * file, the day before's, and the gzip'd ones further back, oldest first,
- * each top to bottom.
+ * Reads the lines of a window from a site's log files: the past logs' days
+ * (HistoryLog), then the shipped ones, today's file, the day before's, and
+ * the gzip'd ones further back, oldest first, each top to bottom.
  *
  * A file last written before the window began holds nothing of it and is
  * skipped. A later file is read whole: a shipper that was down sends
@@ -147,38 +148,39 @@ final class LogWindowReader
     }
 
     /**
-     * The site's files that may hold lines of the window, oldest first.
+     * The site's files that may hold lines of the window, oldest first: the
+     * past logs' days the window touches, then the shipped files.
+     *
+     * Past lines are all older than the first shipped one, so a window that
+     * ends before it reads no shipped file.
      *
      * @return list<string>
      */
     public function files(): array
     {
-        $base = "{$this->folder}/".IngestLog::BASE;
-        $files = [];
+        $history = HistoryLog::in($this->folder);
+        $firstDay = $this->window->start->utc()->toDateString();
+        $files = $history->files($firstDay, $this->window->end->subSecond()->utc()->toDateString());
 
-        foreach (glob("{$base}.*.gz") ?: [] as $path) {
-            if (preg_match('/\.(\d+)\.gz$/', $path, $number) === 1) {
-                $files[(int) $number[1]] = $path;
-            }
-        }
-
-        if (is_file("{$base}.1")) {
-            $files[1] = "{$base}.1";
-        }
-
-        if (is_file($base)) {
-            $files[0] = $base;
-        }
-
-        krsort($files);
-
-        $recent = array_filter($files, fn (string $path) => (int) filemtime($path) >= $this->window->start->getTimestamp());
-
-        if (count($recent) < count($files)) {
+        if ($history->hasDayBefore($firstDay)) {
             $this->reachesBack = true;
         }
 
-        return array_values($recent);
+        $log = new IngestLog($this->folder);
+        $firstShipped = $log->firstLineTime($this->parser);
+
+        if ($firstShipped === null || $firstShipped >= $this->window->end->getTimestamp()) {
+            return $files;
+        }
+
+        $shipped = $log->files();
+        $recent = array_filter($shipped, fn (string $path) => (int) filemtime($path) >= $this->window->start->getTimestamp());
+
+        if (count($recent) < count($shipped)) {
+            $this->reachesBack = true;
+        }
+
+        return [...$files, ...array_values($recent)];
     }
 
     /**

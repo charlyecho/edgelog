@@ -209,12 +209,27 @@ final class Recount
     // ------------------------------------------------------------ lines
 
     /**
-     * Every line of the files that may hold the window, oldest file first.
+     * Every line of the files that may hold the window, oldest file first:
+     * the past logs' days the window touches (history/<UTC day>.log.gz), then
+     * the shipped files, unless the window ends before their first line.
      *
      * @return iterable<int, string>
      */
     private function rawLines(): iterable
     {
+        $paths = [];
+        $fromDay = gmdate('Y-m-d', $this->window->start->getTimestamp());
+        $toDay = gmdate('Y-m-d', $this->window->end->getTimestamp() - 1);
+
+        $history = "{$this->folder}/history";
+
+        foreach ((is_dir($history) ? scandir($history) : []) ?: [] as $name) {
+            if (preg_match('/^(\d{4}-\d{2}-\d{2})\.log\.gz$/', $name, $m) === 1 && $m[1] >= $fromDay && $m[1] <= $toDay) {
+                $paths[$m[1]] = "{$history}/{$name}";
+            }
+        }
+
+        ksort($paths);
         $names = [];
 
         foreach (scandir($this->folder) ?: [] as $name) {
@@ -226,30 +241,68 @@ final class Recount
         }
 
         krsort($names);
-        $n = 0;
+        $shipped = array_map(fn (string $name) => "{$this->folder}/{$name}", array_values($names));
+        $firstShipped = $this->firstTime($shipped);
 
-        foreach ($names as $name) {
-            $path = "{$this->folder}/{$name}";
-
-            if (filemtime($path) < $this->window->start->getTimestamp()) {
-                continue;
-            }
-
-            $handle = str_ends_with($name, '.gz') ? gzopen($path, 'rb') : fopen($path, 'rb');
-
-            if ($handle === false) {
-                continue;
-            }
-
-            while (! (str_ends_with($name, '.gz') ? gzeof($handle) : feof($handle))) {
-                $raw = str_ends_with($name, '.gz') ? gzgets($handle) : fgets($handle);
-
-                if ($raw !== false) {
-                    yield $n++ => $raw;
+        if ($firstShipped !== null && $firstShipped < $this->window->end->getTimestamp()) {
+            foreach ($shipped as $path) {
+                if (filemtime($path) >= $this->window->start->getTimestamp()) {
+                    $paths[] = $path;
                 }
             }
+        }
 
-            str_ends_with($name, '.gz') ? gzclose($handle) : fclose($handle);
+        $n = 0;
+
+        foreach ($paths as $path) {
+            foreach ($this->linesOf($path) as $raw) {
+                yield $n++ => $raw;
+            }
+        }
+    }
+
+    /**
+     * The time of the first readable line of the files, or null.
+     *
+     * @param  list<string>  $paths
+     */
+    private function firstTime(array $paths): ?int
+    {
+        foreach ($paths as $path) {
+            foreach ($this->linesOf($path) as $raw) {
+                $line = $this->read($raw);
+
+                if ($line !== null) {
+                    return $line['t'];
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return iterable<int, string>
+     */
+    private function linesOf(string $path): iterable
+    {
+        $gzip = str_ends_with($path, '.gz');
+        $handle = $gzip ? gzopen($path, 'rb') : fopen($path, 'rb');
+
+        if ($handle === false) {
+            return;
+        }
+
+        try {
+            while (! ($gzip ? gzeof($handle) : feof($handle))) {
+                $raw = $gzip ? gzgets($handle) : fgets($handle);
+
+                if ($raw !== false) {
+                    yield $raw;
+                }
+            }
+        } finally {
+            $gzip ? gzclose($handle) : fclose($handle);
         }
     }
 

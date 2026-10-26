@@ -9,5 +9,6 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('edgelog:run-daily')->hourly()->withoutOverlapping();
+Schedule::command('edgelog:count-history')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('edgelog:live')->everyTwoMinutes()->withoutOverlapping();
 Schedule::command('edgelog:geoip-update')->monthlyOn(3, '04:00');

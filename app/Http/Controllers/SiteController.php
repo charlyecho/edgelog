@@ -6,6 +6,7 @@ use App\Analytics\SitePeriod;
 use App\Analytics\SiteSparklines;
 use App\Enums\IntegrationTool;
 use App\Http\Requests\SaveSiteRequest;
+use App\Ingest\HistoryLog;
 use App\Ingest\ShipperSetup;
 use App\Jobs\FetchSiteIcon;
 use App\Jobs\RefreshToday;
@@ -104,6 +105,7 @@ class SiteController extends Controller
             'stripeEvents' => $site->hookEvents()->where('tool', IntegrationTool::Stripe)->latest('id')->limit(5)->get(),
             'otherTeams' => $otherTeams,
             'setup' => new ShipperSetup($site),
+            'history' => HistoryLog::for($site)->summary(),
             'lastDay' => $site->days()->latest('day')->first(),
         ]);
     }

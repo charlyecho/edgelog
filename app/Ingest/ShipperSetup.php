@@ -95,6 +95,21 @@ final readonly class ShipperSetup
     }
 
     /**
+     * Send the web server's past log files once, as the shipper's user, which reads the logs.
+     */
+    public function backfillCommand(): string
+    {
+        $log = $this->site->log_format->defaultLogPath();
+
+        return <<<SH
+            sudo -u edgelog-ship edgelog-ship \\
+                --url {$this->ingestUrl()} \\
+                --token-file /etc/edgelog-ship/token \\
+                --backfill {$log}*
+            SH;
+    }
+
+    /**
      * Keep stylesheets and scripts in nginx's log, and only images and fonts out.
      */
     public static function nginxAssetLogging(): string

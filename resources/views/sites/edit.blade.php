@@ -160,6 +160,27 @@
             </x-slot:after>
         </x-card>
 
+        <x-card :title="__('Past logs')" :description="__('The web server keeps its older access logs (access.log.1, access.log.2.gz...). The shipper can send them once, so the days before it started are counted too.')">
+            <div class="grid gap-1.5">
+                <p>{{ __('Once the shipper runs, send them from the site\'s server. Only lines older than the first one it shipped are kept, so nothing is counted twice, and running the command again goes on where it stopped.') }}</p>
+                <x-code :code="$setup->backfillCommand()" />
+                <p class="text-xs text-ink-3">{{ __('A gzip\'d file is unpacked in /var/lib/edgelog-ship while it is sent: leave room there for the largest one. The days are counted a few minutes after the last part arrives. Robots.txt, sitemap and stack checks cannot be read for past days.') }}</p>
+            </div>
+
+            <x-slot:after>
+                @if ($history['files'] === 0)
+                    <p class="text-ink-2">{{ __('No past log received yet.') }}</p>
+                @else
+                    <p class="text-ink-2">
+                        {{ trans_choice(':count file|:count files', $history['files']) }},
+                        {{ trans_choice(':count past line kept|:count past lines kept', $history['lines']) }}@if ($history['first']),
+                            {{ __('from :first to :last', ['first' => \Carbon\CarbonImmutable::parse($history['first'])->isoFormat('LL'), 'last' => \Carbon\CarbonImmutable::parse($history['last'])->isoFormat('LL')]) }}@endif.
+                        {{ $history['counting'] ? __('Its days are waiting to be counted.') : __('Its days are counted.') }}
+                    </p>
+                @endif
+            </x-slot:after>
+        </x-card>
+
         <x-card :title="__('Signed-in users')" :description="__('When your app knows who is signed in, it can name them in the log: Edgelog then counts signed-in users across days and devices, and links their payments to where they first came from.')">
             <ol class="grid gap-4">
                 <li class="grid gap-1.5">

@@ -41,4 +41,8 @@ return [
     // One log line, in bytes.
     'max_line' => 64 * 1024,
 
+    // Past logs (edgelog-ship --backfill): their days are counted again once
+    // no part came for this many minutes.
+    'history_settle_minutes' => (int) env('INGEST_HISTORY_SETTLE_MINUTES', 5),
+
 ];

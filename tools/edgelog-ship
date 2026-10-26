@@ -10,6 +10,8 @@
 #                  [--state /var/lib/edgelog-ship/state] \
 #                  [--batch-lines 2000] [--interval 10] [--from-end] [--once]
 #
+#     edgelog-ship --url ... --token-file ... --backfill /var/log/nginx/access.log*
+#
 # How it keeps every line, once:
 #
 #   * Only whole lines are sent; a last line still being written waits for
@@ -35,13 +37,23 @@
 #     after 5 failed tries of a batch or 60 s of waiting in all.
 #   * SIGTERM / SIGINT: the batch in flight gets its answer, then it exits 0.
 #
+# --backfill sends the web server's past log files instead, given after it,
+# plain or gzip'd, oldest first, to <url>/history, then exits. Start the
+# live shipper first: the server keeps only the past lines older than the
+# first one it shipped. Each file is known by the sha256 of its first line,
+# unpacked, which stays the same when logrotate renames or compresses it,
+# and while it grows; the server keeps how far each file went, so running
+# the command again goes on where it stopped and sends nothing twice. A gzip'd
+# file is unpacked next to the state file while it is sent. It gives up
+# (exit 1) after 5 failed tries of a part.
+#
 # The token is never put on a command line (other users could read it in
 # the process list): curl and wget read it from a file only this user reads.
 # The URL must be https://; plain http:// only to localhost, 127.0.0.1 or ::1.
 
 set -u
 
-VERSION=1.0.0
+VERSION=1.1.0
 MAX_BATCH_BYTES=4194304
 MAX_LINE=65536
 MAX_RETRY_AFTER=600
@@ -57,6 +69,7 @@ BATCH_LINES=2000
 INTERVAL=10
 FROM_END=0
 ONCE=0
+BACKFILL=0
 
 say() {
     printf 'edgelog-ship: %s\n' "$*" >&2
@@ -68,7 +81,7 @@ die() {
 }
 
 usage() {
-    sed -n '2,12s/^# \{0,1\}//p' "$0"
+    sed -n '2,14s/^# \{0,1\}//p' "$0"
     exit "${1:-0}"
 }
 
@@ -86,13 +99,20 @@ while [ $# -gt 0 ]; do
         --interval) need_value "$1" $#; INTERVAL=$2; shift 2 ;;
         --from-end) FROM_END=1; shift ;;
         --once) ONCE=1; shift ;;
+        --backfill) BACKFILL=1; shift; break ;;
         --version) echo "edgelog-ship $VERSION"; exit 0 ;;
         -h|--help) usage 0 ;;
         *) say "unknown option: $1"; usage 2 ;;
     esac
 done
 
-[ -n "$URL" ] && [ -n "$TOKEN_FILE" ] && [ -n "$LOG" ] || usage 2
+[ -n "$URL" ] && [ -n "$TOKEN_FILE" ] || usage 2
+if [ "$BACKFILL" -eq 1 ]; then
+    [ $# -gt 0 ] || die "--backfill needs the past log files after it"
+    command -v sha256sum >/dev/null 2>&1 || die "sha256sum is needed"
+else
+    [ -n "$LOG" ] || usage 2
+fi
 
 case $BATCH_LINES in ''|*[!0-9]*|0) die "--batch-lines must be a whole number above 0" ;; esac
 case $INTERVAL in ''|*[!0-9]*) die "--interval must be a whole number of seconds" ;; esac
@@ -249,17 +269,17 @@ http_post() {
             -H @"$WORK/auth" \
             -H 'Content-Type: text/plain; charset=utf-8' \
             -H 'Content-Encoding: gzip' \
-            -H "X-Edgelog-Batch: $SHIPPER:$1" \
+            -H "$1" \
             -A "edgelog-ship/$VERSION" \
-            --data-binary @"$WORK/batch.gz" "$URL" 2>"$WORK/error")
+            --data-binary @"$WORK/batch.gz" "$POST_URL" 2>"$WORK/error")
     else
         WGETRC="$WORK/wgetrc" wget -q -S -O "$WORK/answer" --content-on-error --max-redirect=0 \
             --timeout=60 --tries=1 \
             --header='Content-Type: text/plain; charset=utf-8' \
             --header='Content-Encoding: gzip' \
-            --header="X-Edgelog-Batch: $SHIPPER:$1" \
+            --header="$1" \
             -U "edgelog-ship/$VERSION" \
-            --post-file="$WORK/batch.gz" "$URL" 2>"$WORK/headers"
+            --post-file="$WORK/batch.gz" "$POST_URL" 2>"$WORK/headers"
         STATUS=$(sed -n 's/^ *HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p' "$WORK/headers" | tail -n 1)
     fi
 
@@ -310,7 +330,7 @@ send_batch() {
     waited=0
 
     while :; do
-        http_post "$seq"
+        http_post "X-Edgelog-Batch: $SHIPPER:$seq"
 
         case $STATUS in
             2[0-9][0-9])
@@ -357,8 +377,165 @@ send_batch() {
     done
 }
 
+# ---------------------------------------------------------------- past logs
+
+# The file's id: the sha256 of its first line.
+source_id() {
+    head -n 1 "$1" | sha256sum | cut -c 1-64
+}
+
+# Put the part of $PAST from OFFSET in $WORK/batch, ending at BATCH_END.
+read_past_batch() {
+    tail -c +"$((OFFSET + 1))" "$PAST" | head -c "$((LIMIT - OFFSET))" | head -c "$MAX_BATCH_BYTES" | head -n "$CAP" > "$WORK/raw"
+    raw_size=$(file_size "$WORK/raw")
+
+    # An unfinished last line waits for the next part, unless the part ends
+    # the file or holds that one line alone.
+    if [ "$raw_size" -gt 0 ] && [ "$((OFFSET + raw_size))" -lt "$LIMIT" ] \
+        && [ "$(tail -c 1 "$WORK/raw" | od -An -tx1 | tr -d ' \n')" != 0a ] && [ "$(wc -l < "$WORK/raw")" -gt 0 ]; then
+        sed '$d' "$WORK/raw" > "$WORK/raw.whole" && mv -f "$WORK/raw.whole" "$WORK/raw"
+    fi
+
+    BATCH_END=$((OFFSET + $(file_size "$WORK/raw")))
+    cut -b "1-$MAX_LINE" < "$WORK/raw" > "$WORK/batch"
+    BATCH_LINES_READ=$(wc -l < "$WORK/batch" | tr -d ' ')
+}
+
+# Send $WORK/batch until the server keeps it or says where to go on from.
+# Returns 1 after ONCE_TRIES failed tries, or when the shipper is stopping.
+send_past_batch() {
+    gzip -c < "$WORK/batch" > "$WORK/batch.gz"
+    attempt=0
+
+    while :; do
+        http_post "X-Edgelog-Range: $SOURCE:$OFFSET-$BATCH_END"
+
+        case $STATUS in
+            2[0-9][0-9])
+                OFFSET=$BATCH_END
+                CAP=$BATCH_LINES
+                FILE_KEPT=$((FILE_KEPT + $(number_or "$(answer_field accepted)" 0)))
+                FILE_SHIPPED=$((FILE_SHIPPED + $(number_or "$(answer_field shipped)" 0)))
+                FILE_REFUSED=$((FILE_REFUSED + $(number_or "$(answer_field rejected)" 0)))
+                FILE_PARTS=$((FILE_PARTS + 1))
+                return 0
+                ;;
+            409)
+                if [ "$(answer_field reason)" = offset ]; then
+                    OFFSET=$(number_or "$(answer_field offset)" "$LIMIT")
+                    CAP=$BATCH_LINES
+                    return 0
+                fi
+                die "$(answer_field error)"
+                ;;
+            413)
+                if [ "$BATCH_LINES_READ" -gt 1 ]; then
+                    CAP=$((BATCH_LINES_READ / 2))
+                    say "the server found the part too large; sending $CAP lines at a time"
+                    return 0
+                fi
+                ;;
+        esac
+
+        attempt=$((attempt + 1))
+        wait_for=
+        case $STATUS in 429|503|507) wait_for=$(retry_after) || wait_for= ;; esac
+        [ -n "$wait_for" ] || wait_for=$(backoff "$attempt")
+
+        reason=$(answer_field error)
+        [ -n "$reason" ] || reason=$(head -c 200 "$WORK/error" 2>/dev/null | tr '\n' ' ')
+        [ "$STATUS" != 000 ] || STATUS=unreachable
+        say "part $OFFSET-$BATCH_END not kept ($STATUS: ${reason:-no answer})"
+
+        if [ "$attempt" -ge "$ONCE_TRIES" ]; then
+            say "giving up for now; run the same command again to go on where it stopped"
+            return 1
+        fi
+
+        say "trying again in $wait_for s"
+        nap "$wait_for"
+        [ "$STOPPING" -eq 0 ] || return 1
+    done
+}
+
+backfill_file() {
+    name=$(basename -- "$1")
+
+    if [ ! -r "$1" ] || [ ! -f "$1" ]; then
+        say "$name: cannot be read, skipped"
+        return 0
+    fi
+
+    case $1 in
+        *.gz)
+            if ! gzip -dc -- "$1" > "$WORK/past" 2>/dev/null; then
+                say "$name: cannot be unpacked, skipped"
+                return 0
+            fi
+            PAST=$WORK/past
+            ;;
+        *) PAST=$1 ;;
+    esac
+
+    LIMIT=$(file_size "$PAST")
+
+    # A plain file may still be written to: its unfinished last line waits.
+    if [ "$PAST" = "$1" ] && [ "$LIMIT" -gt 0 ] && [ "$(tail -c 1 "$PAST" | od -An -tx1 | tr -d ' \n')" != 0a ]; then
+        LIMIT=$((LIMIT - $(tail -n 1 "$PAST" | wc -c)))
+    fi
+
+    if [ "$LIMIT" -eq 0 ]; then
+        say "$name: empty, skipped"
+        return 0
+    fi
+
+    SOURCE=$(source_id "$PAST")
+    OFFSET=0
+    CAP=$BATCH_LINES
+    FILE_KEPT=0
+    FILE_SHIPPED=0
+    FILE_REFUSED=0
+    FILE_PARTS=0
+
+    while [ "$OFFSET" -lt "$LIMIT" ] && [ "$STOPPING" -eq 0 ]; do
+        read_past_batch
+        send_past_batch || return 1
+    done
+
+    if [ "$FILE_PARTS" -eq 0 ]; then
+        say "$name: already sent"
+    else
+        say "$name: $FILE_KEPT lines kept, $FILE_SHIPPED already shipped live, $FILE_REFUSED refused"
+        PAST_KEPT=$((PAST_KEPT + FILE_KEPT))
+        PAST_FILES=$((PAST_FILES + 1))
+    fi
+    rm -f "$WORK/past"
+}
+
+if [ "$BACKFILL" -eq 1 ]; then
+    POST_URL=${URL%/}/history
+    PAST_KEPT=0
+    PAST_FILES=0
+
+    # Oldest first: by logrotate's number (access.log.3.gz before
+    # access.log.2.gz), then by the time each file was last written.
+    ls -1dtr -- "$@" > "$WORK/by-time" || die "the past log files cannot be listed"
+    while IFS= read -r past_file; do
+        number=$(printf '%s\n' "$past_file" | sed -n 's/.*\.\([0-9][0-9]*\)\(\.gz\)\{0,1\}$/\1/p')
+        printf '%s\t%s\n' "${number:-0}" "$past_file"
+    done < "$WORK/by-time" | sort -s -t "$(printf '\t')" -k1,1nr | cut -f 2- > "$WORK/files"
+
+    while IFS= read -r past_file <&3 && [ "$STOPPING" -eq 0 ]; do
+        backfill_file "$past_file" || exit 1
+    done 3< "$WORK/files"
+
+    say "sent $PAST_FILES files, $PAST_KEPT past lines kept; their days are counted a few minutes after the last part"
+    exit 0
+fi
+
 # ---------------------------------------------------------------- main
 
+POST_URL=$URL
 load_state
 CAP=$BATCH_LINES
 SENT_LINES=0
