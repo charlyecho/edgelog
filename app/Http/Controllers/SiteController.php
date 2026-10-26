@@ -77,6 +77,7 @@ class SiteController extends Controller
 
         return view('sites.show', [
             'countedAt' => $counted['counted_at'] ?? null,
+            'liveCountries' => $counted === null ? null : RefreshToday::snapshot($counted)->countries,
             'team' => $team,
             'site' => $site,
             'choice' => $choice,
