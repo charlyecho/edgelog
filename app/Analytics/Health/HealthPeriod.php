@@ -26,6 +26,94 @@ final readonly class HealthPeriod
     }
 
     /**
+     * Determine if every verified day was counted with its exact status
+     * codes (days counted before they were kept have only the classes).
+     */
+    public function hasCodes(): bool
+    {
+        return $this->period->hasFigures() && array_sum($this->period->counts(CountKind::HealthCode)) === $this->period->requests();
+    }
+
+    /**
+     * Each status code answered: how many times in all and for each group,
+     * most answered first.
+     *
+     * @return list<array{code: int, all: int, groups: array<string, int>}>
+     */
+    public function codes(): array
+    {
+        $codes = [];
+
+        foreach ($this->period->counts(CountKind::HealthCode) as $name => $count) {
+            [$group, $code] = explode(':', $name, 2);
+            $row = $codes[$code] ?? ['code' => (int) $code, 'all' => 0, 'groups' => array_fill_keys(array_column(TrafficGroup::cases(), 'value'), 0)];
+            $row['all'] += $count;
+            $row['groups'][$group] = ($row['groups'][$group] ?? 0) + $count;
+            $codes[$code] = $row;
+        }
+
+        $codes = array_values($codes);
+        usort($codes, fn (array $a, array $b) => [$b['all'], $a['code']] <=> [$a['all'], $b['code']]);
+
+        return $codes;
+    }
+
+    /**
+     * Each day's errors by status class, and its requests, oldest first;
+     * null for a day without figures.
+     *
+     * @return array<string, ?array{404: int, 4xx: int, 5xx: int, requests: int}>
+     */
+    public function dailyErrors(): array
+    {
+        $daily = $this->period->dailyCounts(CountKind::HealthStatus);
+        $days = [];
+
+        foreach ($this->period->days as $date => $day) {
+            if (! $this->period->verified()->has($date)) {
+                $days[$date] = null;
+
+                continue;
+            }
+
+            $classes = ['404' => 0, '4xx' => 0, '5xx' => 0, 'requests' => 0];
+
+            foreach ($daily[$date] ?? [] as $name => $count) {
+                $status = substr((string) $name, strpos((string) $name, ':') + 1);
+                $classes['requests'] += $count;
+
+                if (in_array($status, ['404', '4xx', '5xx'], true)) {
+                    $classes[$status] += $count;
+                }
+            }
+
+            $days[$date] = $classes;
+        }
+
+        return $days;
+    }
+
+    /**
+     * The 4xx and 5xx answers but the 404s, by status code and page, most
+     * first: a folded tail has no code.
+     *
+     * @return list<array{code: ?int, path: string, requests: int}>
+     */
+    public function errorPages(): array
+    {
+        $rows = [];
+
+        foreach ($this->period->counts(CountKind::HealthErrorPage) as $name => $requests) {
+            [$code, $path] = str_contains($name, "\t") ? explode("\t", $name, 2) : [null, $name];
+            $rows[] = ['code' => $code === null ? null : (int) $code, 'path' => $path, 'requests' => $requests];
+        }
+
+        usort($rows, fn (array $a, array $b) => $b['requests'] <=> $a['requests']);
+
+        return $rows;
+    }
+
+    /**
      * Each group's answers by status class, and all of them.
      *
      * @return array<string, array<string, int>>

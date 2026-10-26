@@ -88,6 +88,7 @@ Route::middleware('auth')->group(function () {
             Route::get('/teams/{team}/sites/{site}/security/block/{format}', [SiteSecurityController::class, 'export'])->name('teams.sites.security.block.export');
             Route::get('/teams/{team}/sites/{site}/site/health', [SiteHealthController::class, 'health'])->name('teams.sites.site.health');
             Route::get('/teams/{team}/sites/{site}/site/requests', [SiteHealthController::class, 'requests'])->name('teams.sites.site.requests');
+            Route::get('/teams/{team}/sites/{site}/site/statuses', [SiteHealthController::class, 'statuses'])->name('teams.sites.site.statuses');
             Route::get('/teams/{team}/sites/{site}/site/not-found', [SiteHealthController::class, 'notFound'])->name('teams.sites.site.not-found');
             Route::get('/teams/{team}/sites/{site}/site/speed', [SiteHealthController::class, 'speed'])->name('teams.sites.site.speed');
             Route::get('/teams/{team}/sites/{site}/site/quality', [SiteHealthController::class, 'quality'])->name('teams.sites.site.quality');

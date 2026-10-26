@@ -66,6 +66,8 @@ enum CountKind: string
     case HealthEngineNotFound = 'health_engine_not_found';
     case HealthPageMs = 'health_page_ms';
     case HealthPageTimed = 'health_page_timed';
+    case HealthCode = 'health_code';
+    case HealthErrorPage = 'health_error_page';
 
     /**
      * The breakdowns of money, by currency (never added across currencies).
@@ -75,7 +77,7 @@ enum CountKind: string
     /**
      * The histograms a median is read from: every row kept, never folded.
      */
-    public const array UNFOLDED = ['visit_pages', 'visit_seconds', 'visit_hour', 'health_status', 'health_speed'];
+    public const array UNFOLDED = ['visit_pages', 'visit_seconds', 'visit_hour', 'health_status', 'health_speed', 'health_code'];
 
     /**
      * Breakdowns that keep more rows than DayFigures::TOP before folding.
@@ -83,7 +85,7 @@ enum CountKind: string
      * @var array<string, int>
      */
     public const array KEEP = ['crawler_path' => 2000, 'crawler_issue' => 1000, 'health_not_found_from' => 1000,
-        'health_page_ms' => 2000, 'health_page_timed' => 2000];
+        'health_page_ms' => 2000, 'health_page_timed' => 2000, 'health_error_page' => 1000];
 
     /**
      * Where a city's country, name and region are joined in its row's name.
@@ -159,6 +161,8 @@ enum CountKind: string
             self::HealthEngineNotFound => __('Missing pages crawlers and assistants hit'),
             self::HealthPageMs => __('Server time spent on each page, in milliseconds'),
             self::HealthPageTimed => __('Timed page views, by page'),
+            self::HealthCode => __('Responses by status code, for each group'),
+            self::HealthErrorPage => __('Errors by status code and page'),
         };
     }
 

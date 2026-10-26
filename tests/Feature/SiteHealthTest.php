@@ -98,6 +98,8 @@ class SiteHealthTest extends TestCase
 
         $this->assertSame(DayStatus::Verified, $day->status, implode("\n", $day->problems ?? []));
         $this->assertSame(['ours:2xx' => 281, 'ours:5xx' => 1, 'people:2xx' => 5, 'people:404' => 1, 'search_engines:404' => 1, 'search_engines:5xx' => 2], $counts(CountKind::HealthStatus));
+        $this->assertSame(['ours:200' => 281, 'ours:503' => 1, 'people:200' => 5, 'people:404' => 1, 'search_engines:404' => 1, 'search_engines:500' => 2], $counts(CountKind::HealthCode));
+        $this->assertSame(["500\t/pricing/" => 2, "503\t/robots.txt" => 1], $counts(CountKind::HealthErrorPage));
         $this->assertSame(['/pricing/' => 2, '/robots.txt' => 1], $counts(CountKind::HealthServerError));
         $this->assertSame(['/old-page' => 1], $counts(CountKind::HealthNotFound));
         $this->assertSame(["/old-page\t(this site)" => 1], $counts(CountKind::HealthNotFoundFrom));
@@ -162,6 +164,22 @@ class SiteHealthTest extends TestCase
         $tab('not-found')->assertSee('/old-page')->assertSee('(this site) 1')->assertSee('open')->assertSee('/gone-page');
         $tab('speed')->assertSee('Answer time by page')->assertSee('1,400 ms')->assertSee('50%');
         $tab('quality')->assertSee('Worth a look')->assertSee('1 line repeats an earlier one exactly.')->assertSee('Verified')->assertSee('Not recorded')->assertSee('access.log');
+    }
+
+    public function test_the_status_codes_tab_shows_each_code_and_the_errors(): void
+    {
+        $this->collect();
+        $viewer = User::factory()->create();
+        $this->site->team->members()->attach($viewer, ['role' => 'viewer']);
+
+        $this->actingAs($viewer)->get(route('teams.sites.site.statuses', [$this->site->team, $this->site, 'days' => '7']))
+            ->assertOk()
+            ->assertSee('1.7%')
+            ->assertSeeInOrder(['200', 'OK', '281', '5', '286'])
+            ->assertSeeInOrder(['500', 'Internal Server Error'])
+            ->assertSee('503 Service Unavailable')
+            ->assertSee('/robots.txt')
+            ->assertDontSee('exact status codes were kept');
     }
 
     public function test_the_requests_tab_lists_the_last_hours_with_their_rule(): void

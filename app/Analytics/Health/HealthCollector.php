@@ -12,6 +12,7 @@ use App\Enums\CountKind;
 use App\Enums\TrafficGroup;
 use App\Ingest\LogHit;
 use Carbon\CarbonImmutable;
+use Symfony\Component\HttpFoundation\Response;
 
 /**
  * The site's health, for one day: what the server answered each group, its
@@ -20,6 +21,10 @@ use Carbon\CarbonImmutable;
  *
  *  status       every request by group and status class ("people:2xx"),
  *               adding up to the day's requests
+ *  code         every request by group and exact status ("people:301"),
+ *               adding up to the day's requests too
+ *  error page   every 4xx or 5xx answer but a 404 (the Not found tab
+ *               has those), by status and page ("403\t/admin")
  *  speed        people's page views by the server's time to answer
  *               ($request_time), "not logged" when the line has none
  *  slow page    a people's page view answered in a second or more
@@ -83,6 +88,11 @@ final class HealthCollector
         $status = self::statusClass($hit->status);
 
         $this->count(CountKind::HealthStatus, "{$verdict->group->value}:{$status}");
+        $this->count(CountKind::HealthCode, "{$verdict->group->value}:{$hit->status}");
+
+        if ($hit->status >= 400 && $hit->status !== 404) {
+            $this->count(CountKind::HealthErrorPage, "{$hit->status}\t{$path}");
+        }
 
         if ($status === '5xx') {
             $this->count(CountKind::HealthServerError, $path);
@@ -165,6 +175,24 @@ final class HealthCollector
             $status >= 200 && $status < 600 => intdiv($status, 100).'xx',
             default => 'other',
         };
+    }
+
+    /**
+     * What a status code means, in a few words: nginx's own codes too.
+     */
+    public static function codeMeaning(int $code): string
+    {
+        $meaning = match ($code) {
+            444 => 'No response (nginx)',
+            494 => 'Request header too large (nginx)',
+            495 => 'SSL certificate error (nginx)',
+            496 => 'SSL certificate required (nginx)',
+            497 => 'HTTP request sent to HTTPS port (nginx)',
+            499 => 'Client closed request (nginx)',
+            default => Response::$statusTexts[$code] ?? null,
+        };
+
+        return $meaning === null ? __('Unknown status') : __($meaning);
     }
 
     /**

@@ -75,6 +75,15 @@ class SiteHealthController extends Controller
     }
 
     /**
+     * Every status code the server answered, by group; the errors of each
+     * day, and the pages answered with an error.
+     */
+    public function statuses(Request $request, Team $team, Site $site): View
+    {
+        return $this->tab($request, $team, $site, 'statuses');
+    }
+
+    /**
      * The pages people could not find, where they came from and whether each
      * is fixed; and the missing pages crawlers and scanners asked for.
      */
