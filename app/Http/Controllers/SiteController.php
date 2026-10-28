@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Analytics\Server\ServerRange;
 use App\Analytics\SitePeriod;
 use App\Analytics\SiteSparklines;
 use App\Enums\IntegrationTool;
@@ -84,6 +85,8 @@ class SiteController extends Controller
             'choice' => $choice,
             'period' => $period,
             'previous' => $period->previous(),
+            'server' => ServerRange::overPeriod($site, $period),
+            'serverBefore' => ServerRange::overPeriod($site, $period->previous()),
         ]);
     }
 

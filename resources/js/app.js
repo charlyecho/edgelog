@@ -70,6 +70,98 @@ function dailyChart(figure) {
 document.querySelectorAll('[data-daily-chart]').forEach(dailyChart);
 
 /**
+ * A server chart's hover layer: a crosshair on the nearest point, and a
+ * tooltip with its figures, already written out by the page. Its table is
+ * drawn from the same figures the first time it is opened, newest first.
+ */
+document.querySelectorAll('[data-series-chart]').forEach((figure) => {
+    const points = JSON.parse(figure.dataset.points || '[]');
+    const lines = JSON.parse(figure.dataset.lines || '[]');
+    const table = figure.querySelector('[data-table]');
+
+    table?.addEventListener('toggle', () => {
+        const holder = table.querySelector('div');
+
+        if (!table.open || holder.childElementCount) {
+            return;
+        }
+
+        const cell = (tag, text, className) => {
+            const element = document.createElement(tag);
+            element.className = className;
+            element.textContent = text;
+
+            return element;
+        };
+        const grid = document.createElement('table');
+        grid.className = 'w-full max-w-xl text-left tabular-nums';
+        const head = grid.createTHead();
+        head.className = 'sticky top-0 bg-surface text-ink-3';
+        head.insertRow().append(cell('th', table.dataset.time, 'py-1 font-semibold'), ...lines.map(([label]) => cell('th', label, 'py-1 text-right font-semibold')));
+        const body = grid.createTBody();
+        body.className = 'divide-y divide-grid';
+
+        for (const point of [...points].reverse()) {
+            if (point.values.some((value) => value !== '–')) {
+                body.insertRow().append(cell('td', point.label, 'py-1'), ...point.values.map((value) => cell('td', value, 'py-1 text-right')));
+            }
+        }
+
+        holder.append(grid);
+    });
+    const svg = figure.querySelector('svg[role="img"]');
+    const hover = figure.querySelector('[data-hover]');
+    const crosshair = figure.querySelector('[data-crosshair]');
+    const tooltip = figure.querySelector('[data-tooltip]');
+
+    if (!points.length || !svg || !hover) {
+        return;
+    }
+
+    hover.addEventListener('pointermove', (event) => {
+        const box = svg.getBoundingClientRect();
+        const x = ((event.clientX - box.left) / box.width) * svg.viewBox.baseVal.width;
+        const point = points.reduce((best, each) => (Math.abs(each.x - x) < Math.abs(best.x - x) ? each : best));
+
+        crosshair.setAttribute('x1', point.x);
+        crosshair.setAttribute('x2', point.x);
+        crosshair.setAttribute('visibility', 'visible');
+
+        tooltip.replaceChildren();
+        const title = document.createElement('p');
+        title.className = 'font-semibold';
+        title.textContent = point.label;
+        tooltip.append(title);
+
+        for (const [index, [label, color]] of lines.entries()) {
+            const value = point.values[index];
+            const row = document.createElement('p');
+            row.className = 'flex items-center justify-between gap-4';
+            const name = document.createElement('span');
+            name.className = 'flex items-center gap-1.5';
+            const swatch = document.createElement('span');
+            swatch.className = 'h-0.5 w-3 rounded-full';
+            swatch.style.background = color;
+            name.append(swatch, label);
+            const amount = document.createElement('span');
+            amount.className = 'font-semibold tabular-nums';
+            amount.textContent = value;
+            row.append(name, amount);
+            tooltip.append(row);
+        }
+
+        tooltip.classList.remove('hidden');
+        const left = (point.x / svg.viewBox.baseVal.width) * box.width;
+        tooltip.style.left = `${Math.min(Math.max(left + 12, 0), box.width - tooltip.offsetWidth)}px`;
+    });
+
+    hover.addEventListener('pointerleave', () => {
+        crosshair.setAttribute('visibility', 'hidden');
+        tooltip.classList.add('hidden');
+    });
+});
+
+/**
  * "See all" on a top list: show the rows past the first few, or hide them again.
  */
 document.querySelectorAll('[data-top-list]').forEach((list) => {

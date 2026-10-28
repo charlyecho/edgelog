@@ -6,6 +6,7 @@
     use App\Enums\EngineTier;
     use App\Enums\SourceType;
     use App\Enums\TrafficGroup;
+    use Illuminate\Support\Number;
 
     $people = $period->group(TrafficGroup::People);
     $before = $previous->group(TrafficGroup::People);
@@ -43,6 +44,10 @@
         'icon' => Labels::sourceIcon($type),
         'count' => $count,
     ])->values()->all();
+    $serverLatest = $server->latest();
+    $serverFullest = collect($serverLatest?->disks ?? [])
+        ->map(fn (array $disk) => [...$disk, 'share' => $disk['used'] + $disk['free'] > 0 ? $disk['used'] / ($disk['used'] + $disk['free']) * 100 : 0])
+        ->sortByDesc('share')->first();
     $assistants = collect($period->top(CountKind::EngineName, 50))->map(fn ($count, $name) => [
         'label' => $label($name, $name),
         'tile' => Labels::owner($name),
@@ -140,6 +145,23 @@
                         :series="$daily(TrafficGroup::Bots, 'requests')" color="var(--group-bots)" />
                 </div>
             </div>
+
+            @if ($server->average('load') !== null)
+                <div class="grid grid-cols-2 gap-px overflow-hidden rounded-[10px] border border-rule bg-rule shadow-card lg:grid-cols-5">
+                    @foreach ([
+                        [__('Processors'), 'cpu', 'percent', __('How busy the server\'s processors were, on average over these days.'), __('peak :value', ['value' => Number::format((float) $server->peak('cpu_peak'), maxPrecision: 1).'%'])],
+                        [__('Memory'), 'memory', 'percent', __('The server\'s memory in use, on average over these days; the cache the system can give back is not counted.'), __('peak :value of :total', ['value' => Number::format((float) $server->peak('memory_peak'), maxPrecision: 1).'%', 'total' => Number::fileSize($serverLatest->memory_total, maxPrecision: 1)])],
+                        [__('Load'), 'load', 'load', __('Work running or waiting for a processor, on average over these days. Above the cores, work waits.'), __('peak :value · :cores', ['value' => number_format((float) $server->peak('load_peak'), 2), 'cores' => trans_choice(':count core|:count cores', $serverLatest->cores)])],
+                        [__('Sent over the network'), 'network_out', 'bytes', __('What the server sent, a second, on average over these days.'), __('received :value', ['value' => __(':size/s', ['size' => Number::fileSize((int) $server->average('network_in'), maxPrecision: 1)])])],
+                        [__('Written to disk'), 'disk_write', 'bytes', __('What the server wrote to its disks, a second, on average over these days.'), $serverFullest === null ? null : __(':mount :share full, :free free', ['mount' => $serverFullest['mount'], 'share' => Number::format($serverFullest['share'], maxPrecision: 1).'%', 'free' => Number::fileSize($serverFullest['free'], maxPrecision: 1)])],
+                    ] as [$name, $key, $format, $about, $extra])
+                        <x-kpi :label="$name" :info="$about" :href="route('teams.sites.site.server', [$team, $site])"
+                            :value="$server->average($key)" :format="$format" :previous="$serverBefore->average($key)" :comparable="$server->average($key) !== null && $serverBefore->average($key) !== null"
+                            :note="$server->average($key) === null ? __('no figure from the server in this period') : __('no figure from the server the period before')"
+                            :extra="$server->average($key) === null ? null : $extra" :series="$server->series($key)" color="var(--group-people)" />
+                    @endforeach
+                </div>
+            @endif
 
             <p class="max-w-[110ch] text-ink-2">
                 {{ __(':visitors visitors read :pages pages, which took :requests requests to the server (pages, images, scripts and styles).', [

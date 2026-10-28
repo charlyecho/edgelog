@@ -1,21 +1,29 @@
-@props(['label', 'value', 'previous' => null, 'comparable' => false, 'format' => 'number', 'currency' => null, 'series' => [], 'color' => 'var(--series-visitors)', 'note' => null, 'info' => null, 'extra' => null])
+@props(['label', 'value', 'previous' => null, 'comparable' => false, 'format' => 'number', 'currency' => null, 'series' => [], 'color' => 'var(--series-visitors)', 'note' => null, 'info' => null, 'extra' => null, 'href' => null])
 
 @php
-    $show = fn ($number) => match ($format) {
-        'ratio' => number_format($number, 1),
-        'money' => \App\Integrations\Money::format((int) $number, $currency),
+    $show = fn ($number) => match (true) {
+        $number === null => '–',
+        $format === 'ratio' => number_format($number, 1),
+        $format === 'percent' => \Illuminate\Support\Number::format($number, maxPrecision: 1).'%',
+        $format === 'load' => number_format($number, 2),
+        $format === 'bytes' => __(':size/s', ['size' => \Illuminate\Support\Number::fileSize($number, maxPrecision: 1)]),
+        $format === 'money' => \App\Integrations\Money::format((int) $number, $currency),
         default => number_format($number),
     };
     $change = null;
 
-    if ($comparable && $previous !== null && $previous > 0) {
+    if ($comparable && $value !== null && $previous !== null && $previous > 0) {
         $change = (int) round(($value - $previous) / $previous * 100);
     }
 @endphp
 
 <div {{ $attributes->class('min-w-0 bg-surface px-4 pt-3 pb-3') }}>
     <p class="flex items-center gap-1.5 text-[13px] font-semibold text-ink-2">
-        {{ $label }}
+        @if ($href)
+            <a href="{{ $href }}" class="hover:text-ink hover:underline">{{ $label }}</a>
+        @else
+            {{ $label }}
+        @endif
         @if ($info)
             <x-info :text="$info" />
         @endif

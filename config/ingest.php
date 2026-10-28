@@ -45,4 +45,9 @@ return [
     // no part came for this many minutes.
     'history_settle_minutes' => (int) env('INGEST_HISTORY_SETTLE_MINUTES', 5),
 
+    // The server's figures (edgelog-ship --metrics): each minute is kept this
+    // many days, each hour's averages and peaks this many.
+    'metrics_minute_days' => (int) env('INGEST_METRICS_MINUTE_DAYS', 7),
+    'metrics_hour_days' => (int) env('INGEST_METRICS_HOUR_DAYS', 400),
+
 ];

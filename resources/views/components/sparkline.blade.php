@@ -5,7 +5,7 @@
     $known = array_filter($values, fn ($value) => $value !== null);
     $top = max([1, ...$known]);
     $count = max(1, count($values) - 1);
-    $point = fn (int $index, int $value) => round($index * $width / $count, 1).' '.round($height - 3 - $value / $top * ($height - 8), 1);
+    $point = fn (int $index, int|float $value) => round($index * $width / $count, 1).' '.round($height - 3 - $value / $top * ($height - 8), 1);
     $line = '';
     $drawing = false;
     $lastIndex = null;

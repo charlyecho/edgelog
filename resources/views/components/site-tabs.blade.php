@@ -9,4 +9,5 @@
     'not-found' => ['label' => __('Not found'), 'href' => route('teams.sites.site.not-found', [$team, $site, ...$keep])],
     'speed' => ['label' => __('Speed'), 'href' => route('teams.sites.site.speed', [$team, $site, ...$keep])],
     'quality' => ['label' => __('Data quality'), 'href' => route('teams.sites.site.quality', [$team, $site, ...$keep])],
+    'server' => ['label' => __('Server'), 'href' => route('teams.sites.site.server', [$team, $site])],
 ]" />

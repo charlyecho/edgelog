@@ -66,7 +66,8 @@ final readonly class ShipperSetup
                 --url {$this->ingestUrl()} \\
                 --token-file /etc/edgelog-ship/token \\
                 --log {$log} \\
-                --state /var/lib/edgelog-ship/state
+                --state /var/lib/edgelog-ship/state \\
+                --metrics
             Restart=always
             RestartSec=5
             StateDirectory=edgelog-ship
@@ -91,6 +92,31 @@ final readonly class ShipperSetup
         return <<<'SH'
             sudo systemctl daemon-reload && sudo systemctl enable --now edgelog-ship
             journalctl -u edgelog-ship -f
+            SH;
+    }
+
+    /**
+     * Read one sample of the server's figures, as --metrics sends them, to see what is sent.
+     */
+    public static function printMetricsCommand(): string
+    {
+        return 'edgelog-ship --print-metrics';
+    }
+
+    /**
+     * On a server that runs a shipper set up before --metrics: a new
+     * shipper, --metrics added to its service, then a restart.
+     */
+    public function enableMetricsCommands(): string
+    {
+        $download = route('shipper.download');
+        $unit = '/etc/systemd/system/edgelog-ship.service';
+
+        return <<<SH
+            curl -fsSL {$download} -o edgelog-ship || wget -qO edgelog-ship {$download}
+            sudo install -m 0755 edgelog-ship /usr/local/bin/edgelog-ship
+            sudo grep -q -- --metrics {$unit} || sudo sed -i 's|--state /var/lib/edgelog-ship/state|& --metrics|' {$unit}
+            sudo systemctl daemon-reload && sudo systemctl restart edgelog-ship
             SH;
     }
 

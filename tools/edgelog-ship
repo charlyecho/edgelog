@@ -9,8 +9,11 @@
 #                  --log /var/log/nginx/access.log \
 #                  [--state /var/lib/edgelog-ship/state] \
 #                  [--batch-lines 2000] [--interval 10] [--from-end] [--once]
+#                  [--metrics]
 #
 #     edgelog-ship --url ... --token-file ... --backfill /var/log/nginx/access.log*
+#
+#     edgelog-ship --print-metrics
 #
 # How it keeps every line, once:
 #
@@ -47,13 +50,20 @@
 # file is unpacked next to the state file while it is sent. It gives up
 # (exit 1) after 5 failed tries of a part.
 #
+# --metrics also sends the server's own figures to <url>/metrics, once a
+# minute, from /proc and df (awk reads them): the processors' busy share,
+# load, memory and swap, each disk's space, and the disk and network bytes a
+# second. They are never kept back: a minute the server does not take is
+# skipped, and the log lines go on all the same. --print-metrics prints one
+# sample, read over a second, and exits; it needs no URL or token.
+#
 # The token is never put on a command line (other users could read it in
 # the process list): curl and wget read it from a file only this user reads.
 # The URL must be https://; plain http:// only to localhost, 127.0.0.1 or ::1.
 
 set -u
 
-VERSION=1.1.0
+VERSION=1.2.0
 MAX_BATCH_BYTES=4194304
 MAX_LINE=65536
 MAX_RETRY_AFTER=600
@@ -70,6 +80,9 @@ INTERVAL=10
 FROM_END=0
 ONCE=0
 BACKFILL=0
+METRICS=0
+PRINT_METRICS=0
+METRICS_EVERY=60
 
 say() {
     printf 'edgelog-ship: %s\n' "$*" >&2
@@ -81,12 +94,88 @@ die() {
 }
 
 usage() {
-    sed -n '2,14s/^# \{0,1\}//p' "$0"
+    sed -n '2,17s/^# \{0,1\}//p' "$0"
     exit "${1:-0}"
 }
 
 need_value() {
     [ "$2" -ge 2 ] || die "$1 needs a value"
+}
+
+# ---------------------------------------------------------------- metrics
+
+# Read the server's figures into $WORK/metrics.json. The counters (processor
+# time, disk sectors, network bytes) are kept in $WORK/metrics.last, so the
+# busy share and the bytes a second are those since the reading before; the
+# first reading, or one after a reboot, has none (null).
+read_metrics() {
+    df -P -k -x tmpfs -x devtmpfs -x squashfs -x overlay -x efivarfs 2>/dev/null > "$WORK/df"
+    LC_ALL=C awk -v now="$(date +%s)" -v previous="$WORK/metrics.last" -v keep="$WORK/metrics.keep" -v df="$WORK/df" '
+        function number(value) { return sprintf("%.0f", value) }
+        function rate(now_value, then_value) {
+            return (elapsed > 0 && now_value >= then_value) ? number((now_value - then_value) / elapsed) : "null"
+        }
+        function text(value) { gsub(/\\/, "\\\\", value); gsub(/"/, "\\\"", value); return "\"" value "\"" }
+
+        FILENAME == "/proc/stat" && $1 == "cpu" {
+            for (i = 2; i <= 9 && i <= NF; i++) total += $i
+            idle = $5 + $6
+            iowait = $6
+        }
+        FILENAME == "/proc/stat" && $1 ~ /^cpu[0-9]+$/ { cores++ }
+        FILENAME == "/proc/meminfo" { memory[$1] = $2 * 1024 }
+        FILENAME == "/proc/loadavg" { load1 = $1; load5 = $2; load15 = $3 }
+        FILENAME == "/proc/uptime" { uptime = int($1) }
+        FILENAME == "/proc/net/dev" && FNR > 2 {
+            line = $0
+            sub(/^[ \t]+/, "", line)
+            split(line, parts, ":")
+            if (parts[1] ~ /^(lo|veth|docker|br-|virbr)/) next
+            split(parts[2], counters, " ")
+            received += counters[1]
+            sent += counters[9]
+        }
+        FILENAME == "/proc/diskstats" {
+            if ($3 ~ /^(loop|ram|zram|dm-|md|sr|fd)/) next
+            whole = "/sys/block/" $3 "/stat"
+            if ((getline ignored < whole) > 0) {
+                read += $6 * 512
+                written += $10 * 512
+            }
+            close(whole)
+        }
+
+        END {
+            if ((getline was < previous) > 0) split(was, then, " ")
+            elapsed = (1 in then) ? now - then[1] : 0
+            if (elapsed > 0 && total > then[2]) {
+                cpu = sprintf("%.1f", 100 * ((total - then[2]) - (idle - then[3])) / (total - then[2]))
+                wait = sprintf("%.1f", 100 * (iowait - then[4]) / (total - then[2]))
+            } else {
+                cpu = "null"
+                wait = "null"
+            }
+            available = ("MemAvailable:" in memory) ? memory["MemAvailable:"] : memory["MemFree:"] + memory["Buffers:"] + memory["Cached:"]
+
+            disks = ""
+            count = 0
+            while ((getline row < df) > 0 && count < 32) {
+                if (++rows == 1) continue
+                n = split(row, field, " ")
+                if (n < 6 || field[2] == 0) continue
+                mount = field[6]
+                for (i = 7; i <= n; i++) mount = mount " " field[i]
+                disks = disks (count++ ? "," : "") "{\"mount\":" text(mount) ",\"size\":" number(field[2] * 1024) ",\"used\":" number(field[3] * 1024) ",\"free\":" number(field[4] * 1024) "}"
+            }
+
+            print now, number(total), number(idle), number(iowait), number(read), number(written), number(received), number(sent) > keep
+            printf "{\"uptime\":%s,\"cores\":%d,\"cpu\":%s,\"iowait\":%s,\"load1\":%s,\"load5\":%s,\"load15\":%s,", uptime, cores, cpu, wait, load1, load5, load15
+            printf "\"memory_total\":%s,\"memory_available\":%s,\"swap_total\":%s,\"swap_free\":%s,", number(memory["MemTotal:"]), number(available), number(memory["SwapTotal:"]), number(memory["SwapFree:"])
+            printf "\"disk_read\":%s,\"disk_write\":%s,\"network_in\":%s,\"network_out\":%s,", rate(read, then[5]), rate(written, then[6]), rate(received, then[7]), rate(sent, then[8])
+            printf "\"disks\":[%s]}\n", disks
+        }
+    ' /proc/stat /proc/meminfo /proc/loadavg /proc/uptime /proc/net/dev /proc/diskstats > "$WORK/metrics.json" || return 1
+    mv -f "$WORK/metrics.keep" "$WORK/metrics.last"
 }
 
 while [ $# -gt 0 ]; do
@@ -99,6 +188,8 @@ while [ $# -gt 0 ]; do
         --interval) need_value "$1" $#; INTERVAL=$2; shift 2 ;;
         --from-end) FROM_END=1; shift ;;
         --once) ONCE=1; shift ;;
+        --metrics) METRICS=1; shift ;;
+        --print-metrics) PRINT_METRICS=1; shift ;;
         --backfill) BACKFILL=1; shift; break ;;
         --version) echo "edgelog-ship $VERSION"; exit 0 ;;
         -h|--help) usage 0 ;;
@@ -106,9 +197,23 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+if [ "$METRICS" -eq 1 ] || [ "$PRINT_METRICS" -eq 1 ]; then
+    [ -r /proc/stat ] || die "--metrics reads /proc, which this system does not have"
+    command -v awk >/dev/null 2>&1 || die "awk is needed to read the server's figures"
+fi
+
+if [ "$PRINT_METRICS" -eq 1 ]; then
+    WORK=$(mktemp -d) || die "no temporary folder"
+    trap 'rm -rf "$WORK"' EXIT
+    read_metrics && sleep 1 && read_metrics || die "the server's figures cannot be read"
+    cat "$WORK/metrics.json"
+    exit 0
+fi
+
 [ -n "$URL" ] && [ -n "$TOKEN_FILE" ] || usage 2
 if [ "$BACKFILL" -eq 1 ]; then
     [ $# -gt 0 ] || die "--backfill needs the past log files after it"
+    [ "$METRICS" -eq 0 ] || die "--metrics goes with the live shipper, not --backfill"
     command -v sha256sum >/dev/null 2>&1 || die "sha256sum is needed"
 else
     [ -n "$LOG" ] || usage 2
@@ -260,26 +365,30 @@ read_batch() {
 
 # ---------------------------------------------------------------- sending
 
+# http_post <header> [<url> <body file> <content type>]: the batch to POST_URL by default.
 http_post() {
+    post_to=${2:-$POST_URL}
+    post_body=${3:-$WORK/batch.gz}
+    post_type=${4:-text/plain; charset=utf-8}
     : > "$WORK/answer"
     : > "$WORK/headers"
 
     if [ "$CLIENT" = curl ]; then
         STATUS=$(curl -sS --max-time 60 -o "$WORK/answer" -D "$WORK/headers" -w '%{http_code}' \
             -H @"$WORK/auth" \
-            -H 'Content-Type: text/plain; charset=utf-8' \
+            -H "Content-Type: $post_type" \
             -H 'Content-Encoding: gzip' \
             -H "$1" \
             -A "edgelog-ship/$VERSION" \
-            --data-binary @"$WORK/batch.gz" "$POST_URL" 2>"$WORK/error")
+            --data-binary @"$post_body" "$post_to" 2>"$WORK/error")
     else
         WGETRC="$WORK/wgetrc" wget -q -S -O "$WORK/answer" --content-on-error --max-redirect=0 \
             --timeout=60 --tries=1 \
-            --header='Content-Type: text/plain; charset=utf-8' \
+            --header="Content-Type: $post_type" \
             --header='Content-Encoding: gzip' \
             --header="$1" \
             -U "edgelog-ship/$VERSION" \
-            --post-file="$WORK/batch.gz" "$POST_URL" 2>"$WORK/headers"
+            --post-file="$post_body" "$post_to" 2>"$WORK/headers"
         STATUS=$(sed -n 's/^ *HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p' "$WORK/headers" | tail -n 1)
     fi
 
@@ -375,6 +484,29 @@ send_batch() {
         waited=$((waited + wait_for))
         [ "$STOPPING" -eq 0 ] || return 1
     done
+}
+
+# Send the server's figures once a minute. One try: a minute the server does
+# not take is skipped, said once until a minute is taken again.
+send_metrics() {
+    [ "$METRICS" -eq 1 ] || return 0
+    [ "$1" = now ] || [ "$(($(date +%s) - METRICS_AT))" -ge "$METRICS_EVERY" ] || return 0
+    METRICS_AT=$(date +%s)
+    read_metrics || return 0
+    gzip -c < "$WORK/metrics.json" > "$WORK/metrics.gz"
+    http_post 'X-Edgelog-Metrics: 1' "${URL%/}/metrics" "$WORK/metrics.gz" 'application/json'
+
+    case $STATUS in
+        2[0-9][0-9]) METRICS_FAILING=0 ;;
+        *)
+            if [ "$METRICS_FAILING" -eq 0 ]; then
+                reason=$(answer_field error)
+                [ "$STATUS" != 000 ] || STATUS=unreachable
+                say "the server's figures were not kept ($STATUS: ${reason:-no answer}); the next ones go in a minute"
+            fi
+            METRICS_FAILING=1
+            ;;
+    esac
 }
 
 # ---------------------------------------------------------------- past logs
@@ -540,6 +672,9 @@ load_state
 CAP=$BATCH_LINES
 SENT_LINES=0
 SENT_BATCHES=0
+METRICS_AT=$(date +%s)
+METRICS_FAILING=0
+[ "$METRICS" -eq 0 ] || read_metrics || say "the server's figures cannot be read; they are tried again in a minute"
 
 if [ -n "$FILE_ID" ] && locate; then
     [ "$FINAL" -eq 0 ] || say "finishing $READING, rotated while stopped"
@@ -558,6 +693,8 @@ else
 fi
 
 while [ "$STOPPING" -eq 0 ]; do
+    send_metrics
+
     if ! locate; then
         if [ -e "$LOG" ]; then
             say "the file being read is gone; starting the current log from its start"
@@ -595,5 +732,8 @@ while [ "$STOPPING" -eq 0 ]; do
     fi
 done
 
-[ "$ONCE" -eq 0 ] || say "sent $SENT_LINES lines in $SENT_BATCHES batches"
+if [ "$ONCE" -eq 1 ]; then
+    send_metrics now
+    say "sent $SENT_LINES lines in $SENT_BATCHES batches"
+fi
 exit 0

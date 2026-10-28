@@ -18,6 +18,7 @@ enum IngestRefusalReason: string
     case BadRange = 'bad_range';
     case NoLiveLog = 'no_live_log';
     case Offset = 'offset';
+    case BadSample = 'bad_sample';
 
     /**
      * Get the HTTP status the endpoint answers with.
@@ -29,7 +30,7 @@ enum IngestRefusalReason: string
             self::WrongSite => 403,
             self::RateLimited, self::DayFull, self::TeamLimit => 429,
             self::Disk => 507,
-            self::BadBatch, self::BadBody, self::BadRange => 400,
+            self::BadBatch, self::BadBody, self::BadRange, self::BadSample => 400,
             self::NoLiveLog, self::Offset => 409,
             self::BadEncoding => 415,
             self::TooLarge => 413,
@@ -56,6 +57,7 @@ enum IngestRefusalReason: string
             self::BadRange => __('X-Edgelog-Range: <file id>:<start>-<end> is needed.'),
             self::NoLiveLog => __('Nothing was shipped live for this site yet. Start the shipper first, then send the past logs: the first line it shipped tells which past lines are new.'),
             self::Offset => __('This part of the file is not the one expected; the answer says where to go on from.'),
+            self::BadSample => __('The server\'s figures could not be read: send one JSON sample, as edgelog-ship --metrics does.'),
         };
     }
 }

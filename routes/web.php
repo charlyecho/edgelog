@@ -13,6 +13,7 @@ use App\Http\Controllers\SiteIntegrationController;
 use App\Http\Controllers\SitePathsController;
 use App\Http\Controllers\SiteRealtimeController;
 use App\Http\Controllers\SiteSecurityController;
+use App\Http\Controllers\SiteServerController;
 use App\Http\Controllers\SiteTeamController;
 use App\Http\Controllers\SiteTokenController;
 use App\Http\Controllers\SiteTrafficController;
@@ -92,6 +93,7 @@ Route::middleware('auth')->group(function () {
             Route::get('/teams/{team}/sites/{site}/site/not-found', [SiteHealthController::class, 'notFound'])->name('teams.sites.site.not-found');
             Route::get('/teams/{team}/sites/{site}/site/speed', [SiteHealthController::class, 'speed'])->name('teams.sites.site.speed');
             Route::get('/teams/{team}/sites/{site}/site/quality', [SiteHealthController::class, 'quality'])->name('teams.sites.site.quality');
+            Route::get('/teams/{team}/sites/{site}/site/server', SiteServerController::class)->name('teams.sites.site.server');
             Route::get('/teams/{team}/sites/{site}/settings', [SiteController::class, 'edit'])->name('teams.sites.edit');
             Route::put('/teams/{team}/sites/{site}', [SiteController::class, 'update'])->name('teams.sites.update');
             Route::delete('/teams/{team}/sites/{site}', [SiteController::class, 'destroy'])->name('teams.sites.destroy');

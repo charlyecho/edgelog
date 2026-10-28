@@ -49,6 +49,22 @@ class Site extends Model
     }
 
     /**
+     * @return HasMany<SiteMetricMinute, $this>
+     */
+    public function metricMinutes(): HasMany
+    {
+        return $this->hasMany(SiteMetricMinute::class);
+    }
+
+    /**
+     * @return HasMany<SiteMetricHour, $this>
+     */
+    public function metricHours(): HasMany
+    {
+        return $this->hasMany(SiteMetricHour::class);
+    }
+
+    /**
      * @return HasMany<SitePage, $this>
      */
     public function pages(): HasMany

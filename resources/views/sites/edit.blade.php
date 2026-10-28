@@ -128,7 +128,7 @@
                     <x-code :code="$setup->tokenCommands()" />
                 </li>
                 <li class="grid gap-1.5">
-                    <p><span class="font-semibold">3.</span> {{ __('Run it as a service. Change --log if the access log is somewhere else.') }}</p>
+                    <p><span class="font-semibold">3.</span> {{ __('Run it as a service. Change --log if the access log is somewhere else. --metrics also sends the server\'s processors, memory and disks once a minute (Site > Server); leave it out not to.') }}</p>
                     <x-code :code="$setup->serviceCommand()" />
                 </li>
                 <li class="grid gap-1.5">
