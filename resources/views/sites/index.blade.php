@@ -27,6 +27,22 @@
                         </span>
                     </span>
 
+                    @if (($alerts[$site->id] ?? []) !== [])
+                        <span class="mt-3 flex flex-wrap gap-1.5">
+                            @foreach ($alerts[$site->id] as $alert)
+                                <span title="{{ $alert['detail'] }}" @class([
+                                    'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-semibold',
+                                    'border-bad/40 bg-bad/10 text-bad' => $alert['tone'] === 'bad',
+                                    'border-warn/40 bg-warn/10 text-warn' => $alert['tone'] === 'warn',
+                                    'border-rule text-ink-3' => $alert['tone'] === 'muted',
+                                ])>
+                                    <span @class(['size-1.5 rounded-full', 'bg-bad' => $alert['tone'] === 'bad', 'bg-warn' => $alert['tone'] === 'warn', 'bg-ink-3' => $alert['tone'] === 'muted'])></span>
+                                    {{ $alert['label'] }}
+                                </span>
+                            @endforeach
+                        </span>
+                    @endif
+
                     @if (count($known) > 1)
                         <x-sparkline :values="$days" color="var(--series-visitors)" :width="320" class="mt-3 h-auto max-w-none" />
                         <span class="mt-1 flex justify-between text-xs text-ink-3">

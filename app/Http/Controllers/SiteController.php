@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Analytics\Server\ServerRange;
+use App\Analytics\SiteAlerts;
 use App\Analytics\SitePeriod;
 use App\Analytics\SiteSparklines;
 use App\Enums\IntegrationTool;
@@ -21,7 +22,7 @@ use Illuminate\View\View;
 class SiteController extends Controller
 {
     /**
-     * List the team's sites.
+     * List the team's sites, each with its visitors and what is wrong with it.
      */
     public function index(Team $team): View
     {
@@ -33,6 +34,7 @@ class SiteController extends Controller
             'team' => $team,
             'sites' => $sites,
             'visitors' => SiteSparklines::visitors($sites),
+            'alerts' => SiteAlerts::for($sites),
         ]);
     }
 
