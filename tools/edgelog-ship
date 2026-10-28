@@ -63,7 +63,7 @@
 
 set -u
 
-VERSION=1.2.0
+VERSION=1.2.1
 MAX_BATCH_BYTES=4194304
 MAX_LINE=65536
 MAX_RETRY_AFTER=600
@@ -490,7 +490,7 @@ send_batch() {
 # not take is skipped, said once until a minute is taken again.
 send_metrics() {
     [ "$METRICS" -eq 1 ] || return 0
-    [ "$1" = now ] || [ "$(($(date +%s) - METRICS_AT))" -ge "$METRICS_EVERY" ] || return 0
+    [ "${1:-}" = now ] || [ "$(($(date +%s) - METRICS_AT))" -ge "$METRICS_EVERY" ] || return 0
     METRICS_AT=$(date +%s)
     read_metrics || return 0
     gzip -c < "$WORK/metrics.json" > "$WORK/metrics.gz"
