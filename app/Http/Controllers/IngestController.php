@@ -3,8 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Actions\Ingest\IngestBatch;
+use App\Actions\Ingest\IngestErrorBatch;
 use App\Actions\Ingest\IngestHistoryBatch;
 use App\Actions\Ingest\IngestServerSample;
+use App\Enums\ErrorLogKind;
 use App\Ingest\IngestRefusal;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -51,6 +53,20 @@ class IngestController extends Controller
         }
 
         return $this->answer(200, ['ok' => true, 'minute' => $sample->minute->toIso8601String()]);
+    }
+
+    /**
+     * Take a batch of an application's error log, from a shipper run with --errors <kind>.
+     */
+    public function errors(Request $request, string $site, ErrorLogKind $kind, IngestErrorBatch $ingestErrorBatch): JsonResponse
+    {
+        try {
+            $outcome = $ingestErrorBatch->handle($site, $kind, $request);
+        } catch (IngestRefusal $refusal) {
+            return $this->refuse($refusal);
+        }
+
+        return $this->answer(200, $outcome->toArray());
     }
 
     private function refuse(IngestRefusal $refusal): JsonResponse

@@ -50,4 +50,12 @@ return [
     'metrics_minute_days' => (int) env('INGEST_METRICS_MINUTE_DAYS', 7),
     'metrics_hour_days' => (int) env('INGEST_METRICS_HOUR_DAYS', 400),
 
+    // Application error logs (edgelog-ship --errors): an entry with no line
+    // after it is read once its log said nothing for this many seconds; the
+    // request of an occurrence is looked for in the access log this many
+    // minutes; each occurrence is kept this many days (its error stays).
+    'error_tail_seconds' => (int) env('INGEST_ERROR_TAIL_SECONDS', 60),
+    'error_lookup_minutes' => (int) env('INGEST_ERROR_LOOKUP_MINUTES', 10),
+    'error_occurrence_days' => (int) env('INGEST_ERROR_OCCURRENCE_DAYS', 30),
+
 ];

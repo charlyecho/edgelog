@@ -2,6 +2,7 @@
 
 namespace App\Ingest;
 
+use App\Enums\ErrorLogKind;
 use App\Models\Site;
 
 /**
@@ -133,6 +134,82 @@ final readonly class ShipperSetup
                 --token-file /etc/edgelog-ship/token \\
                 --backfill {$log}*
             SH;
+    }
+
+    /**
+     * The systemd unit that ships one application error log, and its start:
+     * one unit a log, each with its own place in it. A pattern follows the
+     * newest file of an app that writes one a day.
+     */
+    public function errorsServiceCommands(ErrorLogKind $kind): string
+    {
+        $unit = "edgelog-ship-errors-{$kind->value}";
+
+        return <<<SH
+            sudo tee /etc/systemd/system/{$unit}.service > /dev/null <<'UNIT'
+            [Unit]
+            Description=Ship the {$kind->label()} errors to Edgelog
+            After=network-online.target
+            Wants=network-online.target
+
+            [Service]
+            User=edgelog-ship
+            ExecStart=/usr/local/bin/edgelog-ship \\
+                --url {$this->ingestUrl()} \\
+                --token-file /etc/edgelog-ship/token \\
+                --errors {$kind->value} \\
+                --log '{$kind->examplePath()}' \\
+                --state /var/lib/edgelog-ship/errors-{$kind->value}.state
+            Restart=always
+            RestartSec=5
+            StateDirectory=edgelog-ship
+            StateDirectoryMode=0700
+            NoNewPrivileges=true
+            ProtectSystem=strict
+            ProtectHome=read-only
+            PrivateTmp=true
+            ReadOnlyPaths=/var/log /home /etc/edgelog-ship
+
+            [Install]
+            WantedBy=multi-user.target
+            UNIT
+            sudo systemctl daemon-reload && sudo systemctl enable --now {$unit}
+            journalctl -u {$unit} -f
+            SH;
+    }
+
+    /**
+     * Let the shipper's user read the logs of the apps a Forge user runs.
+     */
+    public static function errorsReadAccessCommand(): string
+    {
+        return 'sudo usermod -aG forge edgelog-ship';
+    }
+
+    /**
+     * A tap that writes the request (URL, address, method, host, referrer)
+     * after each entry of laravel.log, with Monolog's WebProcessor.
+     */
+    public static function laravelRequestTap(): string
+    {
+        return <<<'PHP'
+            // app/Logging/AddRequest.php
+            namespace App\Logging;
+
+            use Illuminate\Log\Logger;
+            use Monolog\Processor\WebProcessor;
+
+            class AddRequest
+            {
+                public function __invoke(Logger $logger): void
+                {
+                    $logger->pushProcessor(new WebProcessor);
+                }
+            }
+
+            // config/logging.php, in the channel that writes laravel.log (single or daily):
+            'tap' => [App\Logging\AddRequest::class],
+            PHP;
     }
 
     /**

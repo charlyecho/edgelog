@@ -65,6 +65,30 @@ class Site extends Model
     }
 
     /**
+     * @return HasMany<SiteError, $this>
+     */
+    public function errors(): HasMany
+    {
+        return $this->hasMany(SiteError::class);
+    }
+
+    /**
+     * @return HasMany<SiteErrorOccurrence, $this>
+     */
+    public function errorOccurrences(): HasMany
+    {
+        return $this->hasMany(SiteErrorOccurrence::class);
+    }
+
+    /**
+     * @return HasMany<SiteErrorStream, $this>
+     */
+    public function errorStreams(): HasMany
+    {
+        return $this->hasMany(SiteErrorStream::class);
+    }
+
+    /**
      * @return HasMany<SitePage, $this>
      */
     public function pages(): HasMany

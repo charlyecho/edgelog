@@ -11,6 +11,10 @@
 #                  [--batch-lines 2000] [--interval 10] [--from-end] [--once]
 #                  [--metrics]
 #
+#     edgelog-ship --url ... --token-file ... --errors laravel|codeigniter|craft|php \
+#                  --log '/home/forge/example.com/storage/logs/laravel.log' \
+#                  --state /var/lib/edgelog-ship/errors-laravel.state
+#
 #     edgelog-ship --url ... --token-file ... --backfill /var/log/nginx/access.log*
 #
 #     edgelog-ship --print-metrics
@@ -50,6 +54,15 @@
 # file is unpacked next to the state file while it is sent. It gives up
 # (exit 1) after 5 failed tries of a part.
 #
+# --errors <kind> sends an application's error log instead, to
+# <url>/errors/<kind>: laravel (laravel.log), codeigniter (writable/logs),
+# craft (storage/logs/web-*.log) or php (php.ini's error_log). Run one shipper
+# per log, each with its own --state. A --log with a * in it (quote it) follows
+# the newest file of an app that writes one a day: once a newer one appears,
+# the one being read is read to its end, then the newer one from its start. A
+# line longer than 64 KiB keeps its start and its end, where an exception
+# names its class and file, with what was cut in the middle.
+#
 # --metrics also sends the server's own figures to <url>/metrics, once a
 # minute, from /proc and df (awk reads them): the processors' busy share,
 # load, memory and swap, each disk's space, and the disk and network bytes a
@@ -63,7 +76,7 @@
 
 set -u
 
-VERSION=1.2.1
+VERSION=1.3.0
 MAX_BATCH_BYTES=4194304
 MAX_LINE=65536
 MAX_RETRY_AFTER=600
@@ -83,6 +96,8 @@ BACKFILL=0
 METRICS=0
 PRINT_METRICS=0
 METRICS_EVERY=60
+ERRORS=
+PATTERN=
 
 say() {
     printf 'edgelog-ship: %s\n' "$*" >&2
@@ -94,7 +109,7 @@ die() {
 }
 
 usage() {
-    sed -n '2,17s/^# \{0,1\}//p' "$0"
+    sed -n '2,21s/^# \{0,1\}//p' "$0"
     exit "${1:-0}"
 }
 
@@ -189,6 +204,7 @@ while [ $# -gt 0 ]; do
         --from-end) FROM_END=1; shift ;;
         --once) ONCE=1; shift ;;
         --metrics) METRICS=1; shift ;;
+        --errors) need_value "$1" $#; ERRORS=$2; shift 2 ;;
         --print-metrics) PRINT_METRICS=1; shift ;;
         --backfill) BACKFILL=1; shift; break ;;
         --version) echo "edgelog-ship $VERSION"; exit 0 ;;
@@ -218,6 +234,17 @@ if [ "$BACKFILL" -eq 1 ]; then
 else
     [ -n "$LOG" ] || usage 2
 fi
+
+case $ERRORS in
+    ''|laravel|codeigniter|craft|php) ;;
+    *) die "--errors takes laravel, codeigniter, craft or php" ;;
+esac
+if [ -n "$ERRORS" ]; then
+    [ "$BACKFILL" -eq 0 ] || die "--errors goes with the live shipper, not --backfill"
+    [ "$METRICS" -eq 0 ] || die "--metrics goes with the shipper of the access log, not --errors"
+    command -v awk >/dev/null 2>&1 || die "awk is needed to send an error log"
+fi
+case $LOG in *[*?[]*) PATTERN=$LOG ;; esac
 
 case $BATCH_LINES in ''|*[!0-9]*|0) die "--batch-lines must be a whole number above 0" ;; esac
 case $INTERVAL in ''|*[!0-9]*) die "--interval must be a whole number of seconds" ;; esac
@@ -313,9 +340,37 @@ nap() {
     done
 }
 
+# The newest file the --log pattern names (they sort by name: a date in it).
+newest_match() {
+    newest=
+    for match in $PATTERN; do
+        [ -f "$match" ] && newest=$match
+    done
+    printf '%s' "$newest"
+}
+
 # Point READING at the file being read: the log itself, or, once it was
-# rotated, <log>.1 (FINAL=1: read to its very end, then move on).
+# rotated, <log>.1 (FINAL=1: read to its very end, then move on). With a
+# pattern, the log is its newest file, and any older one is the rotated one.
 locate() {
+    if [ -n "$PATTERN" ]; then
+        LOG=$(newest_match)
+        [ -n "$FILE_ID" ] && [ -n "$LOG" ] || return 1
+        if [ "$(file_id "$LOG")" = "$FILE_ID" ]; then
+            READING=$LOG
+            FINAL=0
+            return 0
+        fi
+        for match in $PATTERN; do
+            if [ -f "$match" ] && [ "$(file_id "$match")" = "$FILE_ID" ]; then
+                READING=$match
+                FINAL=1
+                return 0
+            fi
+        done
+        return 1
+    fi
+
     if [ -n "$FILE_ID" ] && [ "$(file_id "$LOG")" = "$FILE_ID" ]; then
         READING=$LOG
         FINAL=0
@@ -358,9 +413,26 @@ read_batch() {
     fi
 
     BATCH_END=$((OFFSET + $(file_size "$WORK/raw")))
-    cut -b "1-$MAX_LINE" < "$WORK/raw" > "$WORK/batch"
+    cut_long_lines < "$WORK/raw" > "$WORK/batch"
     BATCH_LINES_READ=$(wc -l < "$WORK/batch" | tr -d ' ')
     [ -s "$WORK/raw" ] || BATCH_LINES_READ=0
+}
+
+# Cut a line longer than MAX_LINE: to its start for an access log; for an
+# error log, to its start and its end, where an exception names its class
+# and where it was thrown.
+cut_long_lines() {
+    if [ -z "$ERRORS" ]; then
+        cut -b "1-$MAX_LINE"
+        return
+    fi
+    LC_ALL=C awk -v max="$MAX_LINE" '
+        length($0) <= max { print; next }
+        {
+            keep = int((max - 64) / 2)
+            print substr($0, 1, keep) " [... " (length($0) - 2 * keep) " bytes cut ...] " substr($0, length($0) - keep + 1)
+        }
+    '
 }
 
 # ---------------------------------------------------------------- sending
@@ -451,6 +523,7 @@ send_batch() {
                 SENT_LINES=$((SENT_LINES + BATCH_LINES_READ))
                 SENT_BATCHES=$((SENT_BATCHES + 1))
                 rejected=$(answer_field rejected)
+                [ -n "$ERRORS" ] && rejected=0
                 case $rejected in ''|0|*[!0-9]*) ;; *) say "batch $seq: $rejected rejected (not in the site's log format)" ;; esac
                 return 0
                 ;;
@@ -668,6 +741,7 @@ fi
 # ---------------------------------------------------------------- main
 
 POST_URL=$URL
+[ -z "$ERRORS" ] || POST_URL="${URL%/}/errors/$ERRORS"
 load_state
 CAP=$BATCH_LINES
 SENT_LINES=0
@@ -682,9 +756,11 @@ else
     if [ -n "$FILE_ID" ]; then
         say "the file read last is gone or compressed; starting the current log from its start"
     fi
-    while [ ! -e "$LOG" ] && [ "$STOPPING" -eq 0 ]; do
-        say "waiting for $LOG"
+    [ -z "$PATTERN" ] || LOG=$(newest_match)
+    while { [ -z "$LOG" ] || [ ! -e "$LOG" ]; } && [ "$STOPPING" -eq 0 ]; do
+        say "waiting for ${LOG:-$PATTERN}"
         nap 5
+        [ -z "$PATTERN" ] || LOG=$(newest_match)
     done
     [ "$STOPPING" -eq 0 ] || exit 0
     first_offset=0
@@ -696,7 +772,7 @@ while [ "$STOPPING" -eq 0 ]; do
     send_metrics
 
     if ! locate; then
-        if [ -e "$LOG" ]; then
+        if [ -n "$LOG" ] && [ -e "$LOG" ]; then
             say "the file being read is gone; starting the current log from its start"
             start_log_from 0
         else

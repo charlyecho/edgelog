@@ -6,6 +6,7 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ShipperDownloadController;
 use App\Http\Controllers\SiteAiController;
 use App\Http\Controllers\SiteController;
+use App\Http\Controllers\SiteErrorsController;
 use App\Http\Controllers\SiteHealthController;
 use App\Http\Controllers\SiteIconController;
 use App\Http\Controllers\SiteInsightsController;
@@ -94,6 +95,9 @@ Route::middleware('auth')->group(function () {
             Route::get('/teams/{team}/sites/{site}/site/speed', [SiteHealthController::class, 'speed'])->name('teams.sites.site.speed');
             Route::get('/teams/{team}/sites/{site}/site/quality', [SiteHealthController::class, 'quality'])->name('teams.sites.site.quality');
             Route::get('/teams/{team}/sites/{site}/site/server', SiteServerController::class)->name('teams.sites.site.server');
+            Route::get('/teams/{team}/sites/{site}/site/errors', [SiteErrorsController::class, 'index'])->name('teams.sites.site.errors');
+            Route::get('/teams/{team}/sites/{site}/site/errors/{error}', [SiteErrorsController::class, 'show'])->name('teams.sites.site.errors.show');
+            Route::put('/teams/{team}/sites/{site}/site/errors/{error}', [SiteErrorsController::class, 'update'])->name('teams.sites.site.errors.update');
             Route::get('/teams/{team}/sites/{site}/settings', [SiteController::class, 'edit'])->name('teams.sites.edit');
             Route::put('/teams/{team}/sites/{site}', [SiteController::class, 'update'])->name('teams.sites.update');
             Route::delete('/teams/{team}/sites/{site}', [SiteController::class, 'destroy'])->name('teams.sites.destroy');

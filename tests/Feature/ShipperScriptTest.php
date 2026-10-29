@@ -29,4 +29,20 @@ class ShipperScriptTest extends TestCase
         $this->assertSame(2, $result->exitCode());
         $this->assertStringContainsString('--backfill needs the past log files', $result->errorOutput());
     }
+
+    public function test_the_shipper_knows_only_the_error_logs_it_can_read(): void
+    {
+        $result = Process::run(['sh', base_path('tools/edgelog-ship'), '--url', 'https://example.com/ingest/x', '--token-file', '/dev/null', '--log', '/dev/null', '--errors', 'symfony']);
+
+        $this->assertSame(2, $result->exitCode());
+        $this->assertStringContainsString('--errors takes laravel, codeigniter, craft or php', $result->errorOutput());
+    }
+
+    public function test_an_error_log_is_sent_without_the_servers_figures(): void
+    {
+        $result = Process::run(['sh', base_path('tools/edgelog-ship'), '--url', 'https://example.com/ingest/x', '--token-file', '/dev/null', '--log', '/dev/null', '--errors', 'laravel', '--metrics']);
+
+        $this->assertSame(2, $result->exitCode());
+        $this->assertStringContainsString('--metrics goes with the shipper of the access log', $result->errorOutput());
+    }
 }
