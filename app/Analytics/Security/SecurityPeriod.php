@@ -3,6 +3,7 @@
 namespace App\Analytics\Security;
 
 use App\Analytics\SitePeriod;
+use App\Enums\CountKind;
 use App\Enums\DayStatus;
 use App\Models\SiteDay;
 use App\Models\SiteDayAttack;
@@ -107,17 +108,61 @@ final class SecurityPeriod
     }
 
     /**
-     * The suspects summed by address, worst first: probes, then attack
-     * attempts, then requests.
+     * The paths probed most over the period, of one kind or any: how often,
+     * and what the server answered them (by class, 2xx first; empty for the
+     * days counted before answers were kept by path).
      *
-     * @param  ?callable(SiteDaySuspect): bool  $keep
+     * @return list<array{path: string, category: string, probes: int, answered: array<string, int>}>
+     */
+    public function probedPaths(?string $category = null, int $rows = 500): array
+    {
+        $answered = [];
+
+        foreach ($this->period->counts(CountKind::SecurityPathAnswer) as $name => $count) {
+            [$path, $class] = array_pad(explode(SecurityNames::ANSWER_SEPARATOR, (string) $name, 2), 2, null);
+
+            if ($class !== null) {
+                $answered[$path][$class] = ($answered[$path][$class] ?? 0) + $count;
+            }
+        }
+
+        $paths = [];
+
+        foreach ($this->period->counts(CountKind::SecurityPath) as $path => $count) {
+            $path = (string) $path;
+            $kind = SecurityNames::category($path, $path);
+
+            if ($path === CountKind::OTHERS || ($category !== null && $kind !== $category)) {
+                continue;
+            }
+
+            $classes = $answered[$path] ?? [];
+            ksort($classes);
+            $paths[] = ['path' => $path, 'category' => $kind, 'probes' => $count, 'answered' => $classes];
+        }
+
+        usort($paths, fn (array $a, array $b) => [$b['probes'], $a['path']] <=> [$a['probes'], $b['path']]);
+
+        return array_slice($paths, 0, $rows);
+    }
+
+    /**
+     * The suspects summed by address, worst first: probes, then attack
+     * attempts, then requests. Read as plain rows, their lists decoded once:
+     * a month holds thousands of them.
+     *
+     * @param  ?callable(object): bool  $keep  given each row, with its lists decoded
      * @return list<array{address: string, country: string, first_seen_at: CarbonImmutable, requests: int, probes: int, attempts: int, fake_requests: int, categories: array<string, int>, answered: array<string, int>, paths: array<string, int>, signs: list<string>, days: int}>
      */
     public function byAddress(?callable $keep = null): array
     {
         $rows = [];
 
-        foreach ($this->suspects()->get() as $suspect) {
+        foreach ($this->suspects()->toBase()->get() as $suspect) {
+            foreach (['categories', 'answered', 'paths', 'signs'] as $list) {
+                $suspect->{$list} = json_decode((string) $suspect->{$list}, true) ?? [];
+            }
+
             if ($keep !== null && ! $keep($suspect)) {
                 continue;
             }
@@ -125,15 +170,16 @@ final class SecurityPeriod
             $row = $rows[$suspect->address] ?? ['address' => $suspect->address, 'country' => $suspect->country, 'first_seen_at' => $suspect->first_seen_at,
                 'requests' => 0, 'probes' => 0, 'attempts' => 0, 'fake_requests' => 0, 'categories' => [], 'answered' => [], 'paths' => [], 'signs' => [], 'days' => [], 'attempted' => []];
 
-            $row['first_seen_at'] = $row['first_seen_at']->min($suspect->first_seen_at);
+            // Stored as Y-m-d H:i:s, so the earliest is the smallest string.
+            $row['first_seen_at'] = min($row['first_seen_at'], $suspect->first_seen_at);
             $row['days'][$suspect->site_day_id] = true;
 
             foreach (['requests', 'probes', 'fake_requests'] as $figure) {
-                $row[$figure] += $suspect->{$figure};
+                $row[$figure] += (int) $suspect->{$figure};
             }
 
             // An address's attempts are on each of its rows of the day: once a day.
-            $row['attempts'] += isset($row['attempted'][$suspect->site_day_id]) ? 0 : $suspect->attempts;
+            $row['attempts'] += isset($row['attempted'][$suspect->site_day_id]) ? 0 : (int) $suspect->attempts;
             $row['attempted'][$suspect->site_day_id] = true;
 
             foreach (['categories', 'answered', 'paths'] as $list) {
@@ -142,7 +188,10 @@ final class SecurityPeriod
                 }
             }
 
-            $row['signs'] = array_values(array_unique([...$row['signs'], ...$suspect->signs]));
+            foreach ($suspect->signs as $sign) {
+                $row['signs'][$sign] = true;
+            }
+
             $rows[$suspect->address] = $row;
         }
 
@@ -151,7 +200,7 @@ final class SecurityPeriod
             arsort($row['paths']);
             unset($row['attempted']);
 
-            return [...$row, 'days' => count($row['days'])];
+            return [...$row, 'first_seen_at' => CarbonImmutable::parse($row['first_seen_at']), 'signs' => array_keys($row['signs']), 'days' => count($row['days'])];
         }, array_values($rows));
 
         usort($rows, fn (array $a, array $b) => [$b['probes'], $b['attempts'], $b['requests']] <=> [$a['probes'], $a['attempts'], $a['requests']]);

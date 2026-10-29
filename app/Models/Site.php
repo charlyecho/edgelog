@@ -2,7 +2,9 @@
 
 namespace App\Models;
 
+use App\Analytics\ServedScripts;
 use App\Enums\LogFormat;
+use App\Models\Concerns\HasIcon;
 use Database\Factories\SiteFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -13,7 +15,6 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 #[Fillable(['name', 'url', 'log_format', 'timezone', 'not_pages', 'own_paths'])]
@@ -22,7 +23,7 @@ use Illuminate\Support\Str;
 class Site extends Model
 {
     /** @use HasFactory<SiteFactory> */
-    use HasFactory, HasUuids;
+    use HasFactory, HasIcon, HasUuids;
 
     /**
      * @return HasOne<SiteRobots, $this>
@@ -49,19 +50,14 @@ class Site extends Model
     }
 
     /**
-     * @return HasMany<SiteMetricMinute, $this>
+     * Get the server the site runs on, known once its shipper sent the server's
+     * figures, or picked by hand (pinned: its shipper then never moves it).
+     *
+     * @return BelongsTo<Server, $this>
      */
-    public function metricMinutes(): HasMany
+    public function server(): BelongsTo
     {
-        return $this->hasMany(SiteMetricMinute::class);
-    }
-
-    /**
-     * @return HasMany<SiteMetricHour, $this>
-     */
-    public function metricHours(): HasMany
-    {
-        return $this->hasMany(SiteMetricHour::class);
+        return $this->belongsTo(Server::class);
     }
 
     /**
@@ -102,38 +98,6 @@ class Site extends Model
     public const string TOKEN_PREFIX = 'edg_';
 
     /**
-     * The image types an icon can be, by the type read from its bytes.
-     *
-     * @var array<string, string>
-     */
-    public const array ICON_TYPES = [
-        'image/png' => 'png',
-        'image/jpeg' => 'jpg',
-        'image/gif' => 'gif',
-        'image/webp' => 'webp',
-        'image/svg+xml' => 'svg',
-        'image/vnd.microsoft.icon' => 'ico',
-        'image/x-icon' => 'ico',
-    ];
-
-    /**
-     * The largest icon kept, in bytes.
-     */
-    public const int ICON_MAX_BYTES = 512 * 1024;
-
-    /**
-     * Delete the site's icon file along with the site.
-     */
-    protected static function booted(): void
-    {
-        static::deleted(function (Site $site) {
-            if ($site->icon_path !== null) {
-                Storage::disk('local')->delete($site->icon_path);
-            }
-        });
-    }
-
-    /**
      * The model's default values for attributes.
      *
      * @var array<string, mixed>
@@ -167,6 +131,8 @@ class Site extends Model
             'log_format' => LogFormat::class,
             'not_pages' => 'array',
             'own_paths' => 'array',
+            'served_scripts' => 'array',
+            'server_pinned' => 'boolean',
         ];
     }
 
@@ -241,6 +207,20 @@ class Site extends Model
     }
 
     /**
+     * The paths the site really has that scanners also ask for: those it set,
+     * and every route of the scripts it was found to serve its pages through.
+     *
+     * @return list<string>
+     */
+    public function ownPathPatterns(): array
+    {
+        return array_values(array_unique([
+            ...$this->own_paths ?? [],
+            ...array_merge(...array_map(ServedScripts::paths(...), $this->served_scripts ?? [])),
+        ]));
+    }
+
+    /**
      * Get the host name of the site's URL.
      */
     public function host(): string
@@ -257,28 +237,13 @@ class Site extends Model
     }
 
     /**
-     * Keep an image as the site's icon, in place of the previous one.
+     * Keep an image as the site's icon, read from the site or uploaded.
      *
      * Returns false, keeping the previous icon, when the bytes are not an image of a known type.
      */
     public function storeIcon(string $contents, bool $uploaded): bool
     {
-        $extension = self::iconExtension($contents);
-
-        if ($extension === null) {
-            return false;
-        }
-
-        $path = "site-icons/{$this->uuid}.{$extension}";
-        Storage::disk('local')->put($path, $contents);
-
-        if ($this->icon_path !== null && $this->icon_path !== $path) {
-            Storage::disk('local')->delete($this->icon_path);
-        }
-
-        $this->forceFill(['icon_path' => $path, 'icon_uploaded' => $uploaded, 'icon_changed_at' => now()])->save();
-
-        return true;
+        return $this->putIcon($contents, ['icon_uploaded' => $uploaded]);
     }
 
     /**
@@ -286,25 +251,12 @@ class Site extends Model
      */
     public function forgetIcon(): void
     {
-        if ($this->icon_path !== null) {
-            Storage::disk('local')->delete($this->icon_path);
-        }
-
-        $this->forceFill(['icon_path' => null, 'icon_uploaded' => false, 'icon_changed_at' => now()])->save();
+        $this->removeIcon(['icon_uploaded' => false]);
     }
 
-    /**
-     * Get the extension of an icon's image type, read from its bytes, or null when it is not one.
-     */
-    public static function iconExtension(string $contents): ?string
+    protected function iconFolder(): string
     {
-        if ($contents === '' || strlen($contents) > self::ICON_MAX_BYTES) {
-            return null;
-        }
-
-        $type = (new \finfo(FILEINFO_MIME_TYPE))->buffer($contents);
-
-        return self::ICON_TYPES[$type] ?? null;
+        return 'site-icons';
     }
 
     /**

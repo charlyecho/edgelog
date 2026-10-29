@@ -8,12 +8,12 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * The minutes of one hour of the site's server, averaged and at their peak,
+ * The minutes of one hour of a server, averaged and at their peak,
  * with its disks as the hour's last minute saw them.
  */
-#[Guarded(['id', 'site_id'])]
+#[Guarded(['id', 'server_id'])]
 #[WithoutTimestamps]
-class SiteMetricHour extends Model
+class ServerMetricHour extends Model
 {
     /**
      * Get the attributes that should be cast.
@@ -29,10 +29,10 @@ class SiteMetricHour extends Model
     }
 
     /**
-     * @return BelongsTo<Site, $this>
+     * @return BelongsTo<Server, $this>
      */
-    public function site(): BelongsTo
+    public function server(): BelongsTo
     {
-        return $this->belongsTo(Site::class);
+        return $this->belongsTo(Server::class);
     }
 }

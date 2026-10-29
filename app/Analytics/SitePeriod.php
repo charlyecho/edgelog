@@ -54,6 +54,8 @@ final class SitePeriod
     private array $groups = [];
 
     /**
+     * Each breakdown over the verified days, read kind by kind as a page asks for it.
+     *
      * @var array<string, array<string, int>>
      */
     private array $counts = [];
@@ -195,11 +197,16 @@ final class SitePeriod
     }
 
     /**
+     * @var ?Collection<string, SiteDay>
+     */
+    private ?Collection $verified = null;
+
+    /**
      * @return Collection<string, SiteDay>
      */
     public function verified(): Collection
     {
-        return collect($this->days)->filter(fn (?SiteDay $day) => $day?->status === DayStatus::Verified);
+        return $this->verified ??= collect($this->days)->filter(fn (?SiteDay $day) => $day?->status === DayStatus::Verified);
     }
 
     /**
@@ -282,7 +289,7 @@ final class SitePeriod
      */
     public function top(CountKind $kind, int $rows = 10): array
     {
-        $counts = $this->counts[$kind->value] ?? [];
+        $counts = $this->counts($kind);
         $others = $counts[CountKind::OTHERS] ?? 0;
         unset($counts[CountKind::OTHERS]);
         arsort($counts);
@@ -304,7 +311,21 @@ final class SitePeriod
      */
     public function counts(CountKind $kind): array
     {
-        return $this->counts[$kind->value] ?? [];
+        if (! array_key_exists($kind->value, $this->counts)) {
+            $this->counts[$kind->value] = $this->live !== null
+                ? $this->live['counts'][$kind->value] ?? []
+                : SiteDayCount::query()
+                    ->whereIn('site_day_id', $this->verified()->pluck('id'))
+                    ->where('kind', $kind)
+                    ->groupBy('name')
+                    ->selectRaw('name, SUM(count) as total')
+                    ->toBase()
+                    ->pluck('total', 'name')
+                    ->map(fn ($total) => (int) $total)
+                    ->all();
+        }
+
+        return $this->counts[$kind->value];
     }
 
     /**
@@ -324,8 +345,9 @@ final class SitePeriod
         SiteDayCount::query()
             ->whereIn('site_day_id', $days->keys())
             ->where('kind', $kind)
+            ->toBase()
             ->get(['site_day_id', 'name', 'count'])
-            ->each(function (SiteDayCount $row) use ($days, &$daily) {
+            ->each(function (object $row) use ($days, &$daily) {
                 $daily[$days[$row->site_day_id]][$row->name] = (int) $row->count;
             });
 
@@ -419,15 +441,15 @@ final class SitePeriod
     public function revenue(): array
     {
         $currencies = array_unique([
-            ...array_keys($this->counts[CountKind::RevenuePaid->value] ?? []),
-            ...array_keys($this->counts[CountKind::RevenueRefunded->value] ?? []),
+            ...array_keys($this->counts(CountKind::RevenuePaid)),
+            ...array_keys($this->counts(CountKind::RevenueRefunded)),
         ]);
         $revenue = [];
 
         foreach ($currencies as $currency) {
-            $paid = $this->counts[CountKind::RevenuePaid->value][$currency] ?? 0;
-            $refunded = $this->counts[CountKind::RevenueRefunded->value][$currency] ?? 0;
-            $revenue[$currency] = ['paid' => $paid, 'refunded' => $refunded, 'net' => $paid - $refunded, 'payments' => $this->counts[CountKind::Payments->value][$currency] ?? 0];
+            $paid = $this->counts(CountKind::RevenuePaid)[$currency] ?? 0;
+            $refunded = $this->counts(CountKind::RevenueRefunded)[$currency] ?? 0;
+            $revenue[$currency] = ['paid' => $paid, 'refunded' => $refunded, 'net' => $paid - $refunded, 'payments' => $this->counts(CountKind::Payments)[$currency] ?? 0];
         }
 
         uasort($revenue, fn (array $a, array $b) => $b['paid'] <=> $a['paid']);
@@ -513,24 +535,12 @@ final class SitePeriod
         }
 
         if ($this->live !== null) {
-            $this->counts = $this->live['counts'];
-
             foreach (CountKind::REVENUE as $kind) {
                 $this->money[0][$kind] = $this->live['counts'][$kind] ?? [];
             }
 
             return;
         }
-
-        SiteDayCount::query()
-            ->whereIn('site_day_id', $verified->pluck('id'))
-            ->selectRaw('kind, name, SUM(count) as total')
-            ->groupBy('kind', 'name')
-            ->toBase()
-            ->get()
-            ->each(function (object $row) {
-                $this->counts[$row->kind][$row->name] = (int) $row->total;
-            });
 
         SiteDayCount::query()
             ->whereIn('site_day_id', $verified->pluck('id'))

@@ -9,7 +9,9 @@ use Illuminate\Support\Facades\Validator;
  * One minute of the site's server, as edgelog-ship --metrics reads it from
  * /proc and df: the processors' busy share and the bytes a second since the
  * sample before (null for the first one), load, memory and swap in bytes,
- * and each disk's space in bytes, at most 32 of them.
+ * and each disk's space in bytes, at most 32 of them. The machine (a hash of
+ * its /etc/machine-id) and its host name tell which server it is; a shipper
+ * older than them sends neither.
  */
 final readonly class ServerSample
 {
@@ -22,7 +24,12 @@ final readonly class ServerSample
      * @param  array<string, int|float|null>  $figures
      * @param  list<array{mount: string, size: int, used: int, free: int}>  $disks
      */
-    private function __construct(public array $figures, public array $disks) {}
+    private function __construct(
+        public array $figures,
+        public array $disks,
+        public ?string $machineId,
+        public ?string $hostname,
+    ) {}
 
     /**
      * Read a sample from its JSON body.
@@ -63,6 +70,8 @@ final readonly class ServerSample
             'disks.*.size' => $count,
             'disks.*.used' => $count,
             'disks.*.free' => $count,
+            'machine_id' => ['sometimes', 'nullable', 'string', 'regex:/^[0-9a-f]{32,64}$/'],
+            'hostname' => ['sometimes', 'nullable', 'string', 'max:255'],
         ]);
 
         if ($validator->fails()) {
@@ -76,13 +85,15 @@ final readonly class ServerSample
             'used' => (int) $disk['used'],
             'free' => (int) $disk['free'],
         ], $valid['disks']);
-        unset($valid['disks']);
+        $machineId = $valid['machine_id'] ?? null;
+        $hostname = isset($valid['hostname']) && trim($valid['hostname']) !== '' ? trim($valid['hostname']) : null;
+        unset($valid['disks'], $valid['machine_id'], $valid['hostname']);
 
-        return new self($valid, $disks);
+        return new self($valid, $disks, $machineId, $hostname);
     }
 
     /**
-     * The sample as a row of site_metric_minutes.
+     * The sample as a row of server_metric_minutes.
      *
      * @return array<string, mixed>
      */

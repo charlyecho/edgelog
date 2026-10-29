@@ -4,10 +4,12 @@ namespace App\Providers;
 
 use App\Analytics\Geo\MmdbPlaces;
 use App\Analytics\Geo\Places;
+use App\Models\Server;
 use App\Models\Site;
 use App\Models\Team;
 use Illuminate\Contracts\View\View as ViewContract;
 use Illuminate\Http\Middleware\TrustProxies;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
@@ -38,15 +40,40 @@ class AppServiceProvider extends ServiceProvider
             $routeTeam = request()->route('team');
             $routeSite = request()->route('site');
 
+            $routeServer = request()->route('server');
+
             $team = $routeTeam instanceof Team && $user->belongsToTeam($routeTeam) ? $routeTeam : $user->currentTeam;
+            $sites = $team?->sitesVisibleTo($user)->orderBy('name')->get() ?? collect();
 
             $view->with([
                 'railTeam' => $team,
                 'railSite' => $routeSite instanceof Site ? $routeSite : null,
-                'railSites' => $team?->sites()->orderBy('name')->get() ?? collect(),
+                'railServer' => $routeServer instanceof Server ? $routeServer : null,
+                'railSites' => $sites,
+                'railGroups' => $team === null ? [] : $this->railGroups($team->serversVisibleTo($user)->with('sites')->get(), $sites),
                 'railTeams' => $user->teams,
             ]);
         });
+    }
+
+    /**
+     * The sites of the switcher, under the server each runs on, servers by
+     * name; then those whose server is unknown, or not granted to the user.
+     *
+     * @param  Collection<int, Server>  $servers
+     * @param  Collection<int, Site>  $sites
+     * @return list<array{server: ?Server, sites: Collection<int, Site>}>
+     */
+    private function railGroups(Collection $servers, Collection $sites): array
+    {
+        $groups = $servers
+            ->sortBy(fn (Server $server) => mb_strtolower($server->name()))
+            ->map(fn (Server $server) => ['server' => $server, 'sites' => $sites->where('server_id', $server->id)->values()])
+            ->values()
+            ->all();
+        $elsewhere = $sites->reject(fn (Site $site) => $servers->contains('id', $site->server_id))->values();
+
+        return $elsewhere->isEmpty() ? $groups : [...$groups, ['server' => null, 'sites' => $elsewhere]];
     }
 
     /**

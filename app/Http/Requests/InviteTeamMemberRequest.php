@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Enums\TeamRole;
+use App\Http\Requests\Concerns\ValidatesMemberAccess;
 use App\Models\Team;
 use Closure;
 use Illuminate\Contracts\Validation\ValidationRule;
@@ -12,6 +13,8 @@ use Illuminate\Validation\Rule;
 
 class InviteTeamMemberRequest extends FormRequest
 {
+    use ValidatesMemberAccess;
+
     /**
      * Determine if the user is authorized to make this request.
      */
@@ -45,6 +48,7 @@ class InviteTeamMemberRequest extends FormRequest
                 'required',
                 Rule::enum(TeamRole::class)->only($this->user()->roleIn($this->team())?->assignableRoles() ?? []),
             ],
+            ...$this->accessRules(),
         ];
     }
 

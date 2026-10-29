@@ -8,6 +8,7 @@ use App\Analytics\VisitorFlow;
 use App\Enums\CountKind;
 use App\Enums\SourceType;
 use App\Models\Site;
+use App\Models\SitePage;
 use App\Models\SiteVisit;
 use App\Models\Team;
 use Illuminate\Database\Eloquent\Builder;
@@ -90,20 +91,26 @@ class SiteTrafficController extends Controller
      */
     public function pages(Request $request, Team $team, Site $site): View
     {
-        return $this->tab($request, $team, $site, 'pages', fn (SitePeriod $period) => [
-            'lastWeek' => SitePeriod::lastDays($site, 7),
-            'lastMonth' => SitePeriod::lastDays($site, 30),
-            'published' => $site->pages()->whereNotNull('first_read_on')
+        return $this->tab($request, $team, $site, 'pages', function (SitePeriod $period) use ($site) {
+            $pages = $site->pages()->whereNotNull('first_read_on')
                 ->where(fn (Builder $query) => $query->where('first_read_on', '>=', $period->first->toDateString())
                     ->orWhere('first_google_on', '>=', $period->first->toDateString()))
-                ->get()
-                ->filter(fn ($page) => $page->publishedOn()?->betweenIncluded($period->first, $period->last))
-                ->sortBy([
-                    fn ($a, $b) => $b->publishedOn() <=> $a->publishedOn(),
-                    fn ($a, $b) => strcmp($a->path, $b->path),
-                ])
-                ->values(),
-        ]);
+                ->get();
+            // Read once a page: the sort compares it many times.
+            $publishedOn = $pages->mapWithKeys(fn (SitePage $page) => [$page->id => $page->publishedOn()]);
+
+            return [
+                'lastWeek' => SitePeriod::lastDays($site, 7),
+                'lastMonth' => SitePeriod::lastDays($site, 30),
+                'published' => $pages
+                    ->filter(fn (SitePage $page) => $publishedOn[$page->id]?->betweenIncluded($period->first, $period->last))
+                    ->sortBy([
+                        fn (SitePage $a, SitePage $b) => $publishedOn[$b->id] <=> $publishedOn[$a->id],
+                        fn (SitePage $a, SitePage $b) => strcmp($a->path, $b->path),
+                    ])
+                    ->values(),
+            ];
+        });
     }
 
     /**

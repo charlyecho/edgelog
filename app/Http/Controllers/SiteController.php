@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Analytics\Server\ServerRange;
+use App\Analytics\ServerAlerts;
 use App\Analytics\SiteAlerts;
 use App\Analytics\SitePeriod;
 use App\Analytics\SiteSparklines;
@@ -22,19 +23,22 @@ use Illuminate\View\View;
 class SiteController extends Controller
 {
     /**
-     * List the team's sites, each with its visitors and what is wrong with it.
+     * List the team's sites, each with its visitors, what is wrong with it
+     * and with its server (once a server, however many sites it runs).
      */
-    public function index(Team $team): View
+    public function index(Request $request, Team $team): View
     {
         Gate::authorize('view', $team);
 
-        $sites = $team->sites()->orderBy('name')->get();
+        $sites = $team->sitesVisibleTo($request->user())->with('server.sites')->orderBy('name')->get();
+        $servers = $team->serversVisibleTo($request->user())->whereIn('id', $sites->pluck('server_id')->filter())->get();
 
         return view('sites.index', [
             'team' => $team,
             'sites' => $sites,
             'visitors' => SiteSparklines::visitors($sites),
             'alerts' => SiteAlerts::for($sites),
+            'serverAlerts' => ServerAlerts::for($servers),
         ]);
     }
 
@@ -78,6 +82,7 @@ class SiteController extends Controller
         $period = $choice === SitePeriod::TODAY
             ? SitePeriod::live($site, $counted['figures'] ?? null) ?? new SitePeriod($site, $today, $today)
             : SitePeriod::choose($site, $choice);
+        $server = $site->server !== null && $request->user()->can('view', $site->server) ? $site->server : null;
 
         return view('sites.show', [
             'countedAt' => $counted['counted_at'] ?? null,
@@ -87,13 +92,13 @@ class SiteController extends Controller
             'choice' => $choice,
             'period' => $period,
             'previous' => $period->previous(),
-            'server' => ServerRange::overPeriod($site, $period),
-            'serverBefore' => ServerRange::overPeriod($site, $period->previous()),
+            'server' => ServerRange::overPeriod($server, $period),
+            'serverBefore' => ServerRange::overPeriod($server, $period->previous()),
         ]);
     }
 
     /**
-     * Show the site's settings: name, URL, token, team and deletion.
+     * Show the site's settings: name, URL, token, server, team and deletion.
      */
     public function edit(Request $request, Team $team, Site $site): View
     {
@@ -109,6 +114,7 @@ class SiteController extends Controller
             'stripe' => $site->integrations->firstWhere('tool', IntegrationTool::Stripe),
             'stripeEvents' => $site->hookEvents()->where('tool', IntegrationTool::Stripe)->latest('id')->limit(5)->get(),
             'otherTeams' => $otherTeams,
+            'servers' => $team->servers()->with('sites')->get()->sortBy(fn ($server) => mb_strtolower($server->name()))->values(),
             'setup' => new ShipperSetup($site),
             'history' => HistoryLog::for($site)->summary(),
             'lastDay' => $site->days()->latest('day')->first(),

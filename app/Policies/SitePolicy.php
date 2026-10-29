@@ -9,11 +9,12 @@ use App\Models\User;
 class SitePolicy
 {
     /**
-     * Determine whether the user can view the site.
+     * Determine whether the user can view the site: a member of its team,
+     * granted the site when they are a limited viewer.
      */
     public function view(User $user, Site $site): bool
     {
-        return $user->belongsToTeam($site->team);
+        return (bool) $user->membershipIn($site->team)?->canSeeSite($site);
     }
 
     /**

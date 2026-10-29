@@ -3,15 +3,16 @@
 namespace App\Analytics\Server;
 
 use App\Analytics\SitePeriod;
-use App\Models\Site;
-use App\Models\SiteMetricHour;
-use App\Models\SiteMetricMinute;
+use App\Models\Server;
+use App\Models\ServerMetricHour;
+use App\Models\ServerMetricMinute;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 
 /**
- * The site's server over the range the page picked: its last minute, and its
- * figures drawn as at most a few hundred points. Up to a day is read from
+ * A server over the range the page picked: its last minute, and its
+ * figures drawn as at most a few hundred points; nothing for a site that
+ * has no server yet. Up to a day is read from
  * the minutes, further from the hours; a point without any sample stays
  * empty, never drawn as zero.
  */
@@ -41,7 +42,7 @@ final class ServerRange
      */
     public const int SILENT_AFTER = 180;
 
-    private ?SiteMetricMinute $latest = null;
+    private ?ServerMetricMinute $latest = null;
 
     private bool $latestRead = false;
 
@@ -54,7 +55,7 @@ final class ServerRange
      * @param  ?string  $range  the range picked on the server tab, if it was picked there
      */
     private function __construct(
-        public readonly Site $site,
+        public readonly ?Server $server,
         public readonly ?string $range,
         public readonly CarbonImmutable $from,
         public readonly CarbonImmutable $until,
@@ -64,29 +65,29 @@ final class ServerRange
     /**
      * One of the RANGES, up to now.
      */
-    public static function last(Site $site, string $range, ?CarbonImmutable $now = null): self
+    public static function last(?Server $server, string $range, ?CarbonImmutable $now = null): self
     {
         [$span, $step] = self::RANGES[$range];
         $now ??= CarbonImmutable::now();
         $until = $now->setTimestamp(intdiv($now->getTimestamp(), $step) * $step + $step);
 
-        return new self($site, $range, $until->subSeconds($span), $until, $step);
+        return new self($server, $range, $until->subSeconds($span), $until, $step);
     }
 
     /**
-     * The days of a period of the overview, from the first's midnight to the
-     * midnight after the last, where the site is; points as wide as those of
-     * the range that spans it (a day of 25 hours still a day), and no further
-     * back than the hours are kept.
+     * A site's server over the days of a period of the overview, from the
+     * first's midnight to the midnight after the last, where the site is;
+     * points as wide as those of the range that spans it (a day of 25 hours
+     * still a day), and no further back than the hours are kept.
      */
-    public static function overPeriod(Site $site, SitePeriod $period): self
+    public static function overPeriod(?Server $server, SitePeriod $period): self
     {
         $until = $period->last->addDay()->startOfDay()->utc();
         $from = $period->first->startOfDay()->utc()->max($until->subDays(config('ingest.metrics_hour_days')));
         $span = $until->getTimestamp() - $from->getTimestamp();
         $step = collect(self::RANGES)->first(fn (array $range) => $span <= $range[0] + 3600, last(self::RANGES))[1];
 
-        return new self($site, null, $from, $until, $step);
+        return new self($server, null, $from, $until, $step);
     }
 
     /**
@@ -116,10 +117,10 @@ final class ServerRange
     /**
      * The last minute the server sent, whatever the range.
      */
-    public function latest(): ?SiteMetricMinute
+    public function latest(): ?ServerMetricMinute
     {
         if (! $this->latestRead) {
-            $this->latest = $this->site->metricMinutes()->latest('minute')->first();
+            $this->latest = $this->server?->metricMinutes()->latest('minute')->first();
             $this->latestRead = true;
         }
 
@@ -211,10 +212,14 @@ final class ServerRange
      */
     private function minuteRows(): Collection
     {
-        return $this->site->metricMinutes()
+        if ($this->server === null) {
+            return collect();
+        }
+
+        return $this->server->metricMinutes()
             ->whereBetween('minute', [$this->from, $this->until])
             ->get()
-            ->map(fn (SiteMetricMinute $minute) => [
+            ->map(fn (ServerMetricMinute $minute) => [
                 'at' => $minute->minute->getTimestamp(),
                 'cpu' => $minute->cpu,
                 'cpu_peak' => $minute->cpu,
@@ -236,10 +241,14 @@ final class ServerRange
      */
     private function hourRows(): Collection
     {
-        return $this->site->metricHours()
+        if ($this->server === null) {
+            return collect();
+        }
+
+        return $this->server->metricHours()
             ->whereBetween('hour', [$this->from, $this->until])
             ->get()
-            ->map(fn (SiteMetricHour $hour) => [
+            ->map(fn (ServerMetricHour $hour) => [
                 'at' => $hour->hour->getTimestamp(),
                 'cpu' => $hour->cpu_average,
                 'cpu_peak' => $hour->cpu_peak,

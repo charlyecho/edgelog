@@ -45,7 +45,7 @@ class User extends Authenticatable
         return $this->belongsToMany(Team::class)
             ->using(Membership::class)
             ->as('membership')
-            ->withPivot('role')
+            ->withPivot('id', 'role', 'limited')
             ->withTimestamps()
             ->orderBy('teams.name');
     }
@@ -66,6 +66,14 @@ class User extends Authenticatable
     public function roleIn(Team $team): ?TeamRole
     {
         return $team->roleOf($this);
+    }
+
+    /**
+     * Get the user's place in the given team, if any.
+     */
+    public function membershipIn(Team $team): ?Membership
+    {
+        return Membership::query()->where('team_id', $team->getKey())->where('user_id', $this->getKey())->first();
     }
 
     /**

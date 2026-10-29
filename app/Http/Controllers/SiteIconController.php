@@ -8,7 +8,6 @@ use App\Models\Team;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -21,16 +20,7 @@ class SiteIconController extends Controller
     {
         Gate::authorize('view', $site);
 
-        abort_if($site->icon_path === null || ! Storage::disk('local')->exists($site->icon_path), 404);
-
-        $type = array_search(pathinfo($site->icon_path, PATHINFO_EXTENSION), Site::ICON_TYPES, true);
-
-        return Storage::disk('local')->response($site->icon_path, null, [
-            'Content-Type' => $type,
-            'Cache-Control' => 'private, max-age=31536000, immutable',
-            'Content-Security-Policy' => "default-src 'none'; style-src 'unsafe-inline'; sandbox",
-            'X-Content-Type-Options' => 'nosniff',
-        ]);
+        return $site->iconResponse();
     }
 
     /**

@@ -38,7 +38,11 @@ class SiteAiController extends Controller
      */
     public function crawlers(Request $request, Team $team, Site $site): View
     {
-        return $this->tab($request, $team, $site, 'crawlers');
+        return $this->tab($request, $team, $site, 'crawlers', function (SitePeriod $period, CrawlerPeriod $crawlers) use ($request) {
+            $bot = array_key_exists((string) $request->query('bot'), $period->counts(CountKind::BotAgent)) ? (string) $request->query('bot') : null;
+
+            return ['bot' => $bot, 'botPaths' => $crawlers->botPaths($bot)];
+        });
     }
 
     /**
@@ -158,7 +162,10 @@ class SiteAiController extends Controller
     /**
      * A tab that reads the period the bar picked.
      */
-    private function tab(Request $request, Team $team, Site $site, string $tab): View
+    /**
+     * @param  ?callable(SitePeriod, CrawlerPeriod): array<string, mixed>  $more
+     */
+    private function tab(Request $request, Team $team, Site $site, string $tab, ?callable $more = null): View
     {
         Gate::authorize('view', $site);
 
@@ -175,6 +182,7 @@ class SiteAiController extends Controller
             'crawlers' => $crawlers,
             'robots' => $robots,
             'verdicts' => new RobotsVerdicts($robots?->body === null ? null : RobotsTxt::parse($robots->body), $crawlers->split(CountKind::CrawlerPath)),
+            ...($more === null ? [] : $more($period, $crawlers)),
         ]);
     }
 }

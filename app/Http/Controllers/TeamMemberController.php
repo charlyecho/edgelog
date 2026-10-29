@@ -14,7 +14,8 @@ use Illuminate\Validation\ValidationException;
 class TeamMemberController extends Controller
 {
     /**
-     * Change the role of a member of the team.
+     * Change the role of a member of the team. Only a viewer can be limited
+     * to some sites and servers: any other role sees everything.
      */
     public function update(Request $request, Team $team, User $member): RedirectResponse
     {
@@ -35,6 +36,10 @@ class TeamMemberController extends Controller
         }
 
         $team->members()->updateExistingPivot($member, ['role' => $role->value]);
+
+        if ($role !== TeamRole::Viewer) {
+            $member->membershipIn($team)->grant(false);
+        }
 
         return back()->with('status', __(':name is now :role.', ['name' => $member->name, 'role' => $role->label()]));
     }

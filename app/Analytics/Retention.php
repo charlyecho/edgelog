@@ -57,9 +57,10 @@ final class Retention
 
         $first = [];
         $seen = [];
+        $dateOf = $days->map(fn ($day) => $day->day->toDateString())->all();
 
         foreach ($rows as $row) {
-            $date = $days[$row->site_day_id]->day->toDateString();
+            $date = $dateOf[$row->site_day_id];
             $first[$row->visitor] = min($first[$row->visitor] ?? $date, $date);
 
             if (! $this->readers || $row->views >= 2) {
@@ -69,11 +70,13 @@ final class Retention
 
         $this->keptFrom = $first === [] ? null : CarbonImmutable::parse(min($first));
         $byStart = [];
+        $indexOf = [];
+        $firstDate = $firstStart->toDateString();
 
         foreach ($first as $visitor => $date) {
-            $index = intdiv((int) $firstStart->diffInDays(CarbonImmutable::parse($date), false), $length);
+            $index = $indexOf[$date] ??= intdiv((int) $firstStart->diffInDays(CarbonImmutable::parse($date), false), $length);
 
-            if ($date >= $firstStart->toDateString() && $index < $count) {
+            if ($date >= $firstDate && $index < $count) {
                 $byStart[$index][] = $visitor;
             }
         }
@@ -108,7 +111,8 @@ final class Retention
                     continue;
                 }
 
-                $back[] = count(array_filter($visitors, fn (string $visitor) => array_intersect_key($seen[$visitor] ?? [], array_flip($dates)) !== []));
+                $wanted = array_flip($dates);
+                $back[] = count(array_filter($visitors, fn (string $visitor) => array_intersect_key($seen[$visitor] ?? [], $wanted) !== []));
                 $state[] = 'counted';
             }
 

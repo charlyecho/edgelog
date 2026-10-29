@@ -4,6 +4,7 @@ namespace App\Analytics\Tally;
 
 use App\Analytics\Classification\Verdict;
 use App\Analytics\Classification\VisitEvidence;
+use App\Analytics\Crawlers\CrawlerCollector;
 use App\Analytics\DayFigures;
 use App\Analytics\Geo\Place;
 use App\Analytics\Geo\Places;
@@ -105,7 +106,7 @@ final class DayTally
             TrafficGroup::People => $this->person($hit, $verdict, $key, $time, $isPage, $path),
             TrafficGroup::AnswerEngines => $this->engine($verdict, $key, $time, $isPage, $path),
             TrafficGroup::SearchEngines => $this->search($verdict, $key, $time, $isPage, $path),
-            TrafficGroup::Bots, TrafficGroup::Ours => $this->other($verdict, $key, $time, $isPage),
+            TrafficGroup::Bots, TrafficGroup::Ours => $this->other($verdict, $key, $time, $isPage, $path),
         };
     }
 
@@ -307,12 +308,13 @@ final class DayTally
         return $utm;
     }
 
-    private function other(Verdict $verdict, string $key, int $time, bool $isPage): void
+    private function other(Verdict $verdict, string $key, int $time, bool $isPage, string $path): void
     {
         $this->visits[$verdict->group->value]->add($key, $time, $isPage ? '' : null);
 
         if ($verdict->group === TrafficGroup::Bots) {
             $this->figures->count(CountKind::BotAgent, $verdict->name);
+            $this->figures->count(CountKind::BotPath, $verdict->name.CrawlerCollector::SEPARATOR.(substr($path, 0, 200) ?: '/'));
         }
     }
 }

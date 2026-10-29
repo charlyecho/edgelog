@@ -96,6 +96,11 @@
                         @error($name)
                             <span class="text-[13px] font-normal text-bad">{{ $message }}</span>
                         @enderror
+                        @if ($name === 'own_paths' && ($site->served_scripts ?? []) !== [])
+                            <span class="font-normal text-ink-2">
+                                {{ __('Found from the log: the site serves its pages through :scripts, so every route under it is the site\'s own too.', ['scripts' => implode(', ', $site->served_scripts)]) }}
+                            </span>
+                        @endif
                     </label>
                 @endforeach
                 <label class="flex items-center gap-2 text-[13px] text-ink-2">
@@ -282,6 +287,31 @@
                     </form>
                 </div>
             @endif
+        </x-card>
+
+        <x-card :title="__('Server')" :description="__('The machine the site runs on is found from what its shipper sends with --metrics. If it was found wrong (an old shipper, or machines cloned from one image), pick it here: the site stays on it, whatever its shipper says.')">
+            <p class="mb-3 text-ink-2">
+                @if ($site->server === null)
+                    {{ __('No server yet: its shipper has sent no figures.') }}
+                @else
+                    {{ $site->server_pinned ? __('Runs on :server, picked by hand.', ['server' => $site->server->name()]) : __('Runs on :server, found from its shipper.', ['server' => $site->server->name()]) }}
+                @endif
+            </p>
+            <form method="POST" action="{{ route('teams.sites.server.update', [$team, $site]) }}" class="flex flex-wrap items-end gap-3">
+                @csrf
+                @method('PUT')
+                <x-select :label="__('Server')" name="server">
+                    <option value="auto" @selected(! $site->server_pinned)>{{ __('Found from its shipper') }}</option>
+                    @foreach ($servers as $server)
+                        <option value="{{ $server->uuid }}" @selected($site->server_pinned && $site->server_id === $server->id)>
+                            {{ $server->name() }}@if ($server->sites->isNotEmpty()) · {{ $server->sites->pluck('name')->join(', ') }}@endif
+                        </option>
+                    @endforeach
+                    <option value="new">{{ __('A new server') }}</option>
+                </x-select>
+                <x-input :label="__('Name of a new server')" name="name" :hint="__('Optional; else its host name, once its shipper sends one.')" />
+                <x-button variant="secondary">{{ __('Save') }}</x-button>
+            </form>
         </x-card>
 
         <x-card :title="__('Team')" :description="__('The site belongs to :team. You can move it to another team where you are an owner or admin.', ['team' => $team->name])">

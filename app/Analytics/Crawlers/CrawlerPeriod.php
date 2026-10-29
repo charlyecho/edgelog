@@ -64,6 +64,42 @@ final class CrawlerPeriod
     }
 
     /**
+     * What bots fetched most: each path with its requests and the bots that
+     * asked for it, busiest first; one bot's paths only when given.
+     *
+     * @return list<array{path: string, requests: int, bots: array<string, int>}>
+     */
+    public function botPaths(?string $bot = null, int $rows = 500): array
+    {
+        $paths = [];
+
+        foreach ($this->split(CountKind::BotPath) as $name => $counts) {
+            if ($bot !== null && $name !== $bot) {
+                continue;
+            }
+
+            foreach ($counts as $path => $count) {
+                if ($path === '') {
+                    continue;
+                }
+
+                $paths[$path] ??= ['path' => (string) $path, 'requests' => 0, 'bots' => []];
+                $paths[$path]['requests'] += $count;
+                $paths[$path]['bots'][$name] = ($paths[$path]['bots'][$name] ?? 0) + $count;
+            }
+        }
+
+        $paths = array_values($paths);
+        usort($paths, fn (array $a, array $b) => [$b['requests'], $a['path']] <=> [$a['requests'], $b['path']]);
+
+        return array_map(function (array $row) {
+            arsort($row['bots']);
+
+            return $row;
+        }, array_slice($paths, 0, $rows));
+    }
+
+    /**
      * Each name's count of a "name\tsomething" breakdown, split back: [name][something] => count.
      *
      * @return array<string, array<string, int>>

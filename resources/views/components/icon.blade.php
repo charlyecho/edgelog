@@ -23,6 +23,12 @@
         @case('route')
             <circle cx="6" cy="19" r="3" /><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15" /><circle cx="18" cy="5" r="3" />
             @break
+        @case('menu')
+            <path d="M4 6h16" /><path d="M4 12h16" /><path d="M4 18h16" />
+            @break
+        @case('server')
+            <rect x="3" y="4" width="18" height="7" rx="2" /><rect x="3" y="13" width="18" height="7" rx="2" /><path d="M7 7.5h.01" /><path d="M7 16.5h.01" />
+            @break
         @case('globe')
             <circle cx="12" cy="12" r="9" /><path d="M3 12h18" /><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18" />
             @break

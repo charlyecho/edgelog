@@ -60,6 +60,11 @@ final class SecurityNames
     public const string LOGIN_PATH = '~(?:^|/)[\w.-]*(?:login|log-in|logon|signin|sign-in|sign_in|auth|session|password'
         .'|passwd|register|signup|sign-up|subscribe|contact|otp|verify|xmlrpc)[\w.-]*(?:/|$)~i';
 
+    /**
+     * Where a probed path and the class of its answer (2xx...) are joined in its row's name.
+     */
+    public const string ANSWER_SEPARATOR = "\t";
+
     public const string PHP_PATH = '~\.php\d?(?:/|$)~i';
 
     /**

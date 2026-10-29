@@ -5,9 +5,12 @@ namespace Tests\Feature;
 use App\Analytics\Server\ServerRange;
 use App\Analytics\SitePeriod;
 use App\Enums\DayStatus;
+use App\Enums\TeamRole;
 use App\Enums\TrafficGroup;
+use App\Models\Server;
+use App\Models\ServerMetricMinute;
 use App\Models\Site;
-use App\Models\SiteMetricMinute;
+use App\Models\Team;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Process;
@@ -69,7 +72,7 @@ class ServerMetricsTest extends TestCase
     /**
      * Post a sample the way the shipper does: gzip'd JSON with the site token.
      */
-    private function send(array|string $sample, ?string $token = null): TestResponse
+    private function send(array|string $sample, ?string $token = null, ?Site $site = null): TestResponse
     {
         $headers = [
             'Authorization' => 'Bearer '.($token ?? $this->token),
@@ -79,7 +82,19 @@ class ServerMetricsTest extends TestCase
         ];
         $body = gzencode(is_string($sample) ? $sample : json_encode($sample));
 
-        return $this->call('POST', route('ingest.metrics', $this->site), [], [], [], $this->transformHeadersToServerVars($headers), $body);
+        return $this->call('POST', route('ingest.metrics', $site ?? $this->site), [], [], [], $this->transformHeadersToServerVars($headers), $body);
+    }
+
+    /**
+     * The site's server, made the way its first sample makes it.
+     */
+    private function server(): Server
+    {
+        if ($this->site->server === null) {
+            $this->site->server()->associate(Server::factory()->for($this->site->team)->create())->save();
+        }
+
+        return $this->site->server;
     }
 
     private function viewer(): User
@@ -94,7 +109,7 @@ class ServerMetricsTest extends TestCase
     {
         $this->send($this->sample())->assertOk()->assertJson(['ok' => true, 'minute' => '2026-10-23T08:30:00+00:00']);
 
-        $minute = $this->site->metricMinutes()->sole();
+        $minute = $this->site->refresh()->server->metricMinutes()->sole();
         $this->assertSame('2026-10-23 08:30:00', $minute->minute->toDateTimeString());
         $this->assertSame(12.5, $minute->cpu);
         $this->assertSame(2 * 1024 ** 3, $minute->memoryUsed());
@@ -107,14 +122,14 @@ class ServerMetricsTest extends TestCase
         $this->travel(30)->seconds();
         $this->send($this->sample(['cpu' => 20]))->assertOk();
 
-        $this->assertSame(20.0, $this->site->metricMinutes()->sole()->cpu);
+        $this->assertSame(20.0, $this->site->refresh()->server->metricMinutes()->sole()->cpu);
     }
 
     public function test_the_first_sample_after_a_start_may_have_no_rates(): void
     {
         $this->send($this->sample(['cpu' => null, 'iowait' => null, 'disk_read' => null, 'network_out' => null]))->assertOk();
 
-        $this->assertNull($this->site->metricMinutes()->sole()->cpu);
+        $this->assertNull($this->site->refresh()->server->metricMinutes()->sole()->cpu);
     }
 
     public function test_a_sample_that_does_not_read_is_refused(): void
@@ -124,37 +139,37 @@ class ServerMetricsTest extends TestCase
         $this->send($this->sample(['memory_total' => 0]))->assertStatus(400);
         $this->send($this->sample(['disks' => array_fill(0, 33, ['mount' => '/', 'size' => 1, 'used' => 1, 'free' => 0])]))->assertStatus(400);
 
-        $this->assertSame(0, SiteMetricMinute::query()->count());
+        $this->assertSame(0, ServerMetricMinute::query()->count());
     }
 
     public function test_a_wrong_token_is_refused(): void
     {
         $this->send($this->sample(), 'edg_nope')->assertStatus(401);
 
-        $this->assertSame(0, SiteMetricMinute::query()->count());
+        $this->assertSame(0, ServerMetricMinute::query()->count());
     }
 
     public function test_the_hours_that_are_over_are_summed_up_and_old_figures_forgotten(): void
     {
         foreach (['08:00' => 10, '08:01' => 30, '08:59' => 20, '09:00' => 90] as $time => $cpu) {
-            $this->site->metricMinutes()->create(['minute' => "2026-10-23 {$time}:00", ...$this->sample(['cpu' => $cpu, 'load1' => $cpu / 10, 'memory_available' => (8 - $cpu / 10) * 1024 ** 3])]);
+            $this->server()->metricMinutes()->create(['minute' => "2026-10-23 {$time}:00", ...$this->sample(['cpu' => $cpu, 'load1' => $cpu / 10, 'memory_available' => (8 - $cpu / 10) * 1024 ** 3])]);
         }
-        $this->site->metricMinutes()->create(['minute' => '2026-10-15 08:00:00', ...$this->sample()]);
-        $this->site->metricHours()->create(['hour' => '2025-09-01 00:00:00', 'samples' => 1, 'load_average' => 0, 'load_peak' => 0, 'cores' => 1,
+        $this->server()->metricMinutes()->create(['minute' => '2026-10-15 08:00:00', ...$this->sample()]);
+        $this->server()->metricHours()->create(['hour' => '2025-09-01 00:00:00', 'samples' => 1, 'load_average' => 0, 'load_peak' => 0, 'cores' => 1,
             'memory_total' => 1, 'memory_used_average' => 0, 'memory_used_peak' => 0, 'swap_total' => 0, 'swap_used_peak' => 0, 'disks' => []]);
 
         $this->travelTo('2026-10-23 09:02:00');
         $this->artisan('edgelog:roll-metrics')->assertSuccessful();
         $this->artisan('edgelog:roll-metrics')->assertSuccessful();
 
-        $hour = $this->site->metricHours()->sole();
+        $hour = $this->server()->metricHours()->sole();
         $this->assertSame('2026-10-23 08:00:00', $hour->hour->toDateTimeString());
         $this->assertSame(3, $hour->samples);
         $this->assertSame(20.0, $hour->cpu_average);
         $this->assertSame(30.0, $hour->cpu_peak);
         $this->assertSame(3.0, $hour->load_peak);
         $this->assertSame(3 * 1024 ** 3, $hour->memory_used_peak);
-        $this->assertSame(4, $this->site->metricMinutes()->count(), 'the minute of 15 October is past the week kept');
+        $this->assertSame(4, $this->server()->metricMinutes()->count(), 'the minute of 15 October is past the week kept');
     }
 
     public function test_the_server_tab_explains_how_to_start_without_figures(): void
@@ -198,8 +213,8 @@ class ServerMetricsTest extends TestCase
     {
         $this->site->days()->create(['day' => '2026-10-22', 'timezone' => 'UTC', 'status' => DayStatus::Verified])
             ->groups()->create(['group' => TrafficGroup::People, 'readers' => 3, 'requests' => 9, 'views' => 3, 'visits' => 3]);
-        $this->site->metricMinutes()->create(['minute' => '2026-10-22 10:00:00', ...$this->sample(['cpu' => 33.3])]);
-        $this->site->metricMinutes()->create(['minute' => '2026-10-21 10:00:00', ...$this->sample(['cpu' => 77.7])]);
+        $this->server()->metricMinutes()->create(['minute' => '2026-10-22 10:00:00', ...$this->sample(['cpu' => 33.3])]);
+        $this->server()->metricMinutes()->create(['minute' => '2026-10-21 10:00:00', ...$this->sample(['cpu' => 77.7])]);
 
         $this->actingAs($this->viewer())
             ->get(route('teams.sites.show', [$this->site->team, $this->site, 'days' => '1']))
@@ -224,10 +239,10 @@ class ServerMetricsTest extends TestCase
     public function test_a_period_starts_at_midnight_where_the_site_is(): void
     {
         $this->site->update(['timezone' => 'Europe/Paris']);
-        $this->site->metricHours()->create(['hour' => '2026-10-20 13:00:00', 'samples' => 60, 'cpu_average' => 40, 'load_average' => 1, 'load_peak' => 2, 'cores' => 4,
+        $this->server()->metricHours()->create(['hour' => '2026-10-20 13:00:00', 'samples' => 60, 'cpu_average' => 40, 'load_average' => 1, 'load_peak' => 2, 'cores' => 4,
             'memory_total' => 8, 'memory_used_average' => 4, 'memory_used_peak' => 6, 'swap_total' => 0, 'swap_used_peak' => 0, 'disks' => []]);
 
-        $server = ServerRange::overPeriod($this->site, SitePeriod::lastDays($this->site, 30));
+        $server = ServerRange::overPeriod($this->server(), SitePeriod::lastDays($this->site, 30));
 
         $this->assertSame('2026-10-23 00:00:00', $server->until->setTimezone('Europe/Paris')->toDateTimeString());
         $this->assertSame(3 * 3600, $server->step());
@@ -244,6 +259,266 @@ class ServerMetricsTest extends TestCase
 
         $this->assertTrue($result->successful(), $result->errorOutput());
         $this->send($result->output())->assertOk();
-        $this->assertNotNull($this->site->metricMinutes()->sole()->cpu);
+        $this->assertNotNull($this->site->refresh()->server->metricMinutes()->sole()->cpu);
+    }
+
+    /**
+     * Another site of the same team, with its own token.
+     *
+     * @return array{0: Site, 1: string}
+     */
+    private function otherSite(?Site $of = null): array
+    {
+        $site = Site::factory()->for(($of ?? $this->site)->team)->make();
+        $token = $site->fillNewToken();
+        $site->save();
+
+        return [$site, $token];
+    }
+
+    public function test_the_sites_of_one_machine_share_its_server_and_its_figures_are_kept_once(): void
+    {
+        [$other, $otherToken] = $this->otherSite();
+        $machine = ['machine_id' => str_repeat('a1', 16), 'hostname' => 'web-1'];
+
+        $this->send($this->sample([...$machine, 'cpu' => 10]))->assertOk();
+        $this->travel(20)->seconds();
+        $this->send($this->sample([...$machine, 'cpu' => 30]), $otherToken, $other)->assertOk();
+
+        $server = Server::query()->sole();
+        $this->assertSame('web-1', $server->hostname);
+        $this->assertSame([$this->site->id, $other->id], $server->sites()->orderBy('id')->pluck('id')->all());
+        $this->assertSame(30.0, $server->metricMinutes()->sole()->cpu, 'one row a minute, whichever shipper sent it');
+    }
+
+    public function test_the_same_machine_in_another_team_is_another_server(): void
+    {
+        $stranger = Site::factory()->make();
+        $strangerToken = $stranger->fillNewToken();
+        $stranger->save();
+        $machine = ['machine_id' => str_repeat('b2', 16)];
+
+        $this->send($this->sample($machine))->assertOk();
+        $this->send($this->sample($machine), $strangerToken, $stranger)->assertOk();
+
+        $this->assertSame(2, Server::query()->count());
+        $this->assertFalse($this->site->fresh()->server->is($stranger->fresh()->server));
+    }
+
+    public function test_a_shipper_that_sends_no_machine_keeps_the_sites_own_server(): void
+    {
+        $this->send($this->sample())->assertOk();
+        $this->travel(1)->minutes();
+        $this->send($this->sample())->assertOk();
+
+        $server = Server::query()->sole();
+        $this->assertNull($server->machine_id);
+        $this->assertSame(2, $server->metricMinutes()->count());
+    }
+
+    public function test_a_server_made_before_machine_ids_takes_the_first_one_sent(): void
+    {
+        $this->send($this->sample())->assertOk();
+        $server = $this->site->fresh()->server;
+
+        $this->travel(1)->minutes();
+        $this->send($this->sample(['machine_id' => str_repeat('c3', 16), 'hostname' => 'web-2']))->assertOk();
+
+        $this->assertTrue($this->site->fresh()->server->is($server));
+        $this->assertSame(str_repeat('c3', 16), $server->fresh()->machine_id);
+        $this->assertSame('web-2', $server->fresh()->hostname);
+    }
+
+    public function test_a_machine_id_that_is_not_a_hash_is_refused(): void
+    {
+        $this->send($this->sample(['machine_id' => 'not a hash']))->assertStatus(400);
+
+        $this->assertSame(0, Server::query()->count());
+    }
+
+    public function test_the_servers_page_lists_each_server_with_its_sites(): void
+    {
+        [$other, $otherToken] = $this->otherSite();
+        $machine = ['machine_id' => str_repeat('d4', 16), 'hostname' => 'web-3'];
+        $this->send($this->sample($machine))->assertOk();
+        $this->send($this->sample($machine), $otherToken, $other)->assertOk();
+        [$waiting] = $this->otherSite();
+
+        $this->actingAs($this->viewer())
+            ->get(route('teams.servers.index', $this->site->team))
+            ->assertOk()
+            ->assertSee('web-3')
+            ->assertSee($this->site->name)
+            ->assertSee($other->name)
+            ->assertSee('Disk / 96%')
+            ->assertSee('No log yet')
+            ->assertSee('No known server')
+            ->assertSee(route('teams.sites.show', [$this->site->team, $other]), false)
+            ->assertSee(route('teams.sites.show', [$this->site->team, $waiting]), false);
+    }
+
+    public function test_the_server_page_shows_its_figures_and_its_sites(): void
+    {
+        [$other, $otherToken] = $this->otherSite();
+        $machine = ['machine_id' => str_repeat('e5', 16), 'hostname' => 'web-4'];
+        $this->send($this->sample($machine))->assertOk();
+        $this->send($this->sample($machine), $otherToken, $other)->assertOk();
+        $server = Server::query()->sole();
+
+        $this->actingAs($this->viewer())
+            ->get(route('teams.servers.show', [$this->site->team, $server]))
+            ->assertOk()
+            ->assertSee('web-4')
+            ->assertSee('The 2 sites it runs')
+            ->assertSee('No log yet')
+            ->assertSee($other->name)
+            ->assertSee('12.5%')
+            ->assertSee('/boot/efi')
+            ->assertDontSee('Forget the server');
+
+        $this->actingAs($this->viewer())
+            ->get(route('teams.sites.site.server', [$this->site->team, $this->site]))
+            ->assertOk()
+            ->assertSee('Runs on')
+            ->assertSee("Its figures are shared with 1 other site: {$other->name}.");
+    }
+
+    public function test_the_server_page_is_for_its_team_only(): void
+    {
+        $this->send($this->sample())->assertOk();
+        $server = Server::query()->sole();
+        $stranger = User::factory()->create();
+        $strangersTeam = Team::factory()->withMember($stranger)->create();
+
+        $this->actingAs($stranger)->get(route('teams.servers.show', [$this->site->team, $server]))->assertForbidden();
+        $this->actingAs($stranger)->get(route('teams.servers.show', [$strangersTeam, $server]))->assertNotFound();
+    }
+
+    public function test_a_manager_forgets_a_server_and_its_figures_but_not_its_sites(): void
+    {
+        $this->send($this->sample())->assertOk();
+        $server = Server::query()->sole();
+        $team = $this->site->team;
+
+        $this->actingAs($this->viewer())->delete(route('teams.servers.destroy', [$team, $server]))->assertForbidden();
+
+        $admin = User::factory()->create();
+        $team->members()->attach($admin, ['role' => TeamRole::Admin]);
+
+        $this->actingAs($admin)
+            ->delete(route('teams.servers.destroy', [$team, $server]))
+            ->assertRedirect(route('teams.servers.index', $team));
+
+        $this->assertModelMissing($server);
+        $this->assertSame(0, ServerMetricMinute::query()->count());
+        $this->assertNull($this->site->fresh()->server_id);
+    }
+
+    private function admin(): User
+    {
+        $admin = User::factory()->create();
+        $this->site->team->members()->attach($admin, ['role' => TeamRole::Admin->value]);
+
+        return $admin;
+    }
+
+    public function test_a_site_put_on_a_server_by_hand_stays_there_whatever_its_shipper_says(): void
+    {
+        [$other, $otherToken] = $this->otherSite();
+        $this->send($this->sample(['machine_id' => str_repeat('a1', 16)]))->assertOk();
+        $this->send($this->sample(['machine_id' => str_repeat('b2', 16)]), $otherToken, $other)->assertOk();
+        $first = $this->site->fresh()->server;
+
+        $this->actingAs($this->admin())
+            ->put(route('teams.sites.server.update', [$this->site->team, $other]), ['server' => $first->uuid])
+            ->assertSessionHasNoErrors();
+
+        $this->travel(1)->minutes();
+        $this->send($this->sample(['machine_id' => str_repeat('b2', 16), 'cpu' => 55]), $otherToken, $other)->assertOk();
+
+        $this->assertTrue($other->fresh()->server->is($first));
+        $this->assertTrue($other->fresh()->server_pinned);
+        $this->assertSame(55.0, $first->metricMinutes()->latest('minute')->first()->cpu);
+    }
+
+    public function test_a_new_server_split_from_a_cloned_machine_takes_the_sites_samples(): void
+    {
+        [$other, $otherToken] = $this->otherSite();
+        $clone = ['machine_id' => str_repeat('c3', 16)];
+        $this->send($this->sample($clone))->assertOk();
+        $this->send($this->sample($clone), $otherToken, $other)->assertOk();
+        $this->assertSame(1, Server::query()->count());
+
+        $this->actingAs($this->admin())
+            ->put(route('teams.sites.server.update', [$this->site->team, $other]), ['server' => 'new', 'name' => 'vm-2'])
+            ->assertSessionHasNoErrors();
+
+        $this->travel(1)->minutes();
+        $this->send($this->sample([...$clone, 'cpu' => 77]), $otherToken, $other)->assertOk();
+        $this->send($this->sample([...$clone, 'cpu' => 11]))->assertOk();
+
+        $split = $other->fresh()->server;
+        $this->assertSame('vm-2', $split->name());
+        $this->assertNull($split->machine_id, 'the machine id stays with the first server');
+        $this->assertSame(77.0, $split->metricMinutes()->sole()->cpu);
+        $this->assertSame(11.0, $this->site->fresh()->server->metricMinutes()->latest('minute')->first()->cpu);
+    }
+
+    public function test_back_to_automatic_the_next_sample_ties_the_site_to_its_machine(): void
+    {
+        $this->send($this->sample(['machine_id' => str_repeat('d4', 16)]))->assertOk();
+        $machine = $this->site->fresh()->server;
+        $admin = $this->admin();
+        $this->actingAs($admin)->put(route('teams.sites.server.update', [$this->site->team, $this->site]), ['server' => 'new']);
+
+        $this->actingAs($admin)
+            ->put(route('teams.sites.server.update', [$this->site->team, $this->site]), ['server' => 'auto'])
+            ->assertSessionHasNoErrors();
+        $this->travel(1)->minutes();
+        $this->send($this->sample(['machine_id' => str_repeat('d4', 16)]))->assertOk();
+
+        $this->assertTrue($this->site->fresh()->server->is($machine));
+        $this->assertFalse($this->site->fresh()->server_pinned);
+    }
+
+    public function test_only_a_manager_picks_a_server_of_the_sites_team(): void
+    {
+        $elsewhere = Server::factory()->create();
+
+        $this->actingAs($this->viewer())
+            ->put(route('teams.sites.server.update', [$this->site->team, $this->site]), ['server' => 'new'])
+            ->assertForbidden();
+
+        $this->actingAs($this->admin())
+            ->put(route('teams.sites.server.update', [$this->site->team, $this->site]), ['server' => $elsewhere->uuid])
+            ->assertSessionHasErrors('server');
+
+        $this->assertNull($this->site->fresh()->server_id);
+    }
+
+    public function test_a_manager_renames_a_server_and_an_empty_name_shows_its_host_name_again(): void
+    {
+        $this->send($this->sample(['machine_id' => str_repeat('e5', 16), 'hostname' => 'web-9']))->assertOk();
+        $server = Server::query()->sole();
+        $admin = $this->admin();
+
+        $this->actingAs($this->viewer())->put(route('teams.servers.update', [$this->site->team, $server]), ['name' => 'nope'])->assertForbidden();
+
+        $this->actingAs($admin)->put(route('teams.servers.update', [$this->site->team, $server]), ['name' => 'Main box'])->assertSessionHasNoErrors();
+        $this->assertSame('Main box', $server->fresh()->name());
+
+        $this->actingAs($admin)->put(route('teams.servers.update', [$this->site->team, $server]), ['name' => ''])->assertSessionHasNoErrors();
+        $this->assertSame('web-9', $server->fresh()->name());
+    }
+
+    public function test_the_site_settings_offer_the_teams_servers(): void
+    {
+        $this->send($this->sample(['hostname' => 'web-7']))->assertOk();
+
+        $this->actingAs($this->admin())
+            ->get(route('teams.sites.edit', [$this->site->team, $this->site]))
+            ->assertOk()
+            ->assertSee('Runs on web-7, found from its shipper.')
+            ->assertSee('A new server');
     }
 }

@@ -2,6 +2,7 @@
 
 namespace App\Analytics;
 
+use App\Actions\Sites\RememberServedScripts;
 use App\Analytics\Classification\Classifier;
 use App\Analytics\Classification\Verdict;
 use App\Analytics\Classification\VisitEvidence;
@@ -21,11 +22,13 @@ use App\Models\Site;
 /**
  * Counts one day of a site from its shipped log, in two passes over the
  * window: the first learns what only a whole visit tells (VisitEvidence),
- * the second classifies every request in time order and adds it up.
+ * the second classifies every request in time order and adds it up. The
+ * first also looks for the scripts the site serves its pages through
+ * (ServedScripts): one found makes its routes the site's own paths.
  */
 final class DayCollector
 {
-    public function __construct(private readonly Places $places) {}
+    public function __construct(private readonly Places $places, private readonly RememberServedScripts $rememberServedScripts) {}
 
     /**
      * The day's figures, or null when the logs hold nothing for it (a day
@@ -52,6 +55,7 @@ final class DayCollector
         );
 
         $quality = new QualityCollector;
+        $servedScripts = new ServedScripts($hosts->hosts);
         $newest = PHP_INT_MIN;
         $lateness = 0;
         $stylesheets = 0;
@@ -64,12 +68,19 @@ final class DayCollector
 
             if ($hosts->covers($hit)) {
                 $evidence->add($hit);
+                $servedScripts->add($hit);
                 $stylesheets += str_ends_with(strtolower($hit->path()), '.css') ? 1 : 0;
             }
         }
 
         if ($reader->lines === 0 && ! $reader->reachesBack) {
             return null;
+        }
+
+        // A script the site serves its pages through, found today: its
+        // routes are the site's own paths, so the first pass starts again.
+        if ($this->rememberServedScripts->handle($site, $servedScripts->found()) !== []) {
+            return $this->collect($site, $window, $also);
         }
 
         $evidence->finish();

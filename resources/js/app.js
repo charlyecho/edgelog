@@ -315,3 +315,33 @@ if (drawer) {
         }
     });
 }
+
+/**
+ * On a phone, the header's menu button slides the rail in over the page;
+ * the backdrop, Escape or a link of it closes it again.
+ */
+const rail = document.querySelector('[data-rail]');
+const railToggle = document.querySelector('[data-rail-toggle]');
+const railBackdrop = document.querySelector('[data-rail-backdrop]');
+
+if (rail && railToggle && railBackdrop) {
+    const setRail = (open) => {
+        rail.toggleAttribute('data-open', open);
+        railBackdrop.classList.toggle('hidden', !open);
+        railToggle.setAttribute('aria-expanded', String(open));
+        document.documentElement.classList.toggle('overflow-hidden', open);
+    };
+
+    railToggle.addEventListener('click', () => setRail(!rail.hasAttribute('data-open')));
+    railBackdrop.addEventListener('click', () => setRail(false));
+    rail.addEventListener('click', (event) => {
+        if (event.target.closest('a[href]')) {
+            setRail(false);
+        }
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && rail.hasAttribute('data-open')) {
+            setRail(false);
+        }
+    });
+}

@@ -6,6 +6,8 @@
     with href, the label is a link; with drawer, it opens in the side panel.
     Rows past $shown stay hidden behind "See all".
 --}}
+@php($icons = [])
+
 <section {{ $attributes->class('rounded-[10px] border border-rule bg-surface p-4 shadow-card') }} data-top-list>
     @if ($title || count($rows) > $shown)
         <header class="mb-2 flex items-baseline justify-between gap-3">
@@ -46,7 +48,8 @@
                                                 <span class="flex-none" aria-hidden="true">{{ $cell['flag'] }}</span>
                                             @endif
                                             @if (! empty($cell['icon']))
-                                                <x-icon :name="$cell['icon']" class="size-3.5 text-ink-2" />
+                                                {{-- Drawn once a name: a long table repeats a few icons hundreds of times. --}}
+                                                {!! $icons[$cell['icon']] ??= view('components.icon', ['name' => $cell['icon'], 'attributes' => new \Illuminate\View\ComponentAttributeBag(['class' => 'size-3.5 text-ink-2'])])->render() !!}
                                             @endif
                                             @if (! empty($cell['tile']))
                                                 <span class="grid size-4 flex-none place-items-center rounded-[4px] text-[10px] font-bold text-white" style="background: {{ $cell['tile'][1] }}" aria-hidden="true">{{ $cell['tile'][0] }}</span>

@@ -8,13 +8,13 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * What the site's server said about itself in one minute (edgelog-ship
+ * What a server said about itself in one minute (edgelog-ship
  * --metrics): its processors, memory, disks and network. Rates are per
  * second since the sample before, so the first one after a start has none.
  */
-#[Guarded(['id', 'site_id'])]
+#[Guarded(['id', 'server_id'])]
 #[WithoutTimestamps]
-class SiteMetricMinute extends Model
+class ServerMetricMinute extends Model
 {
     /**
      * Get the attributes that should be cast.
@@ -30,11 +30,11 @@ class SiteMetricMinute extends Model
     }
 
     /**
-     * @return BelongsTo<Site, $this>
+     * @return BelongsTo<Server, $this>
      */
-    public function site(): BelongsTo
+    public function server(): BelongsTo
     {
-        return $this->belongsTo(Site::class);
+        return $this->belongsTo(Server::class);
     }
 
     /**

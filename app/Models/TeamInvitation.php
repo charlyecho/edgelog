@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Str;
 
-#[Fillable(['email', 'role', 'token_hash', 'expires_at', 'invited_by'])]
+#[Fillable(['email', 'role', 'limited', 'site_ids', 'server_ids', 'token_hash', 'expires_at', 'invited_by'])]
 #[Hidden(['token_hash'])]
 class TeamInvitation extends Model
 {
@@ -32,6 +32,9 @@ class TeamInvitation extends Model
     {
         return [
             'role' => TeamRole::class,
+            'limited' => 'boolean',
+            'site_ids' => 'array',
+            'server_ids' => 'array',
             'expires_at' => 'datetime',
         ];
     }

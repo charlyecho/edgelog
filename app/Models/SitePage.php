@@ -42,6 +42,8 @@ class SitePage extends Model
      */
     public function publishedOn(): ?CarbonImmutable
     {
-        return collect([$this->first_read_on, $this->first_google_on])->filter()->min();
+        $dates = array_filter([$this->first_read_on, $this->first_google_on]);
+
+        return $dates === [] ? null : min($dates);
     }
 }

@@ -67,8 +67,11 @@
 # minute, from /proc and df (awk reads them): the processors' busy share,
 # load, memory and swap, each disk's space, and the disk and network bytes a
 # second. They are never kept back: a minute the server does not take is
-# skipped, and the log lines go on all the same. --print-metrics prints one
-# sample, read over a second, and exits; it needs no URL or token.
+# skipped, and the log lines go on all the same. Each sample names the
+# machine by a hash of its /etc/machine-id (never the id itself) and its host
+# name, so the sites whose shippers run on it share one server, its figures
+# kept once. --print-metrics prints one sample, read over a second, and
+# exits; it needs no URL or token.
 #
 # The token is never put on a command line (other users could read it in
 # the process list): curl and wget read it from a file only this user reads.
@@ -94,6 +97,7 @@ FROM_END=0
 ONCE=0
 BACKFILL=0
 METRICS=0
+MACHINE=
 PRINT_METRICS=0
 METRICS_EVERY=60
 ERRORS=
@@ -119,13 +123,26 @@ need_value() {
 
 # ---------------------------------------------------------------- metrics
 
+# The machine, by a hash of its id: the same for every shipper on it, and
+# nothing that tells the id itself. Empty when there is no id to read.
+machine_hash() {
+    command -v sha256sum >/dev/null 2>&1 || return 0
+    for file in /etc/machine-id /var/lib/dbus/machine-id; do
+        if [ -s "$file" ]; then
+            { printf 'edgelog:'; tr -d ' \t\r\n' < "$file"; } | sha256sum | cut -c1-32
+            return 0
+        fi
+    done
+}
+
 # Read the server's figures into $WORK/metrics.json. The counters (processor
 # time, disk sectors, network bytes) are kept in $WORK/metrics.last, so the
 # busy share and the bytes a second are those since the reading before; the
 # first reading, or one after a reboot, has none (null).
 read_metrics() {
     df -P -k -x tmpfs -x devtmpfs -x squashfs -x overlay -x efivarfs 2>/dev/null > "$WORK/df"
-    LC_ALL=C awk -v now="$(date +%s)" -v previous="$WORK/metrics.last" -v keep="$WORK/metrics.keep" -v df="$WORK/df" '
+    LC_ALL=C awk -v now="$(date +%s)" -v previous="$WORK/metrics.last" -v keep="$WORK/metrics.keep" -v df="$WORK/df" \
+        -v machine="$MACHINE" -v host="$(uname -n 2>/dev/null)" '
         function number(value) { return sprintf("%.0f", value) }
         function rate(now_value, then_value) {
             return (elapsed > 0 && now_value >= then_value) ? number((now_value - then_value) / elapsed) : "null"
@@ -187,6 +204,7 @@ read_metrics() {
             printf "{\"uptime\":%s,\"cores\":%d,\"cpu\":%s,\"iowait\":%s,\"load1\":%s,\"load5\":%s,\"load15\":%s,", uptime, cores, cpu, wait, load1, load5, load15
             printf "\"memory_total\":%s,\"memory_available\":%s,\"swap_total\":%s,\"swap_free\":%s,", number(memory["MemTotal:"]), number(available), number(memory["SwapTotal:"]), number(memory["SwapFree:"])
             printf "\"disk_read\":%s,\"disk_write\":%s,\"network_in\":%s,\"network_out\":%s,", rate(read, then[5]), rate(written, then[6]), rate(received, then[7]), rate(sent, then[8])
+            printf "\"machine_id\":%s,\"hostname\":%s,", (machine == "" ? "null" : text(machine)), (host == "" ? "null" : text(host))
             printf "\"disks\":[%s]}\n", disks
         }
     ' /proc/stat /proc/meminfo /proc/loadavg /proc/uptime /proc/net/dev /proc/diskstats > "$WORK/metrics.json" || return 1
@@ -216,6 +234,7 @@ done
 if [ "$METRICS" -eq 1 ] || [ "$PRINT_METRICS" -eq 1 ]; then
     [ -r /proc/stat ] || die "--metrics reads /proc, which this system does not have"
     command -v awk >/dev/null 2>&1 || die "awk is needed to read the server's figures"
+    MACHINE=$(machine_hash)
 fi
 
 if [ "$PRINT_METRICS" -eq 1 ]; then

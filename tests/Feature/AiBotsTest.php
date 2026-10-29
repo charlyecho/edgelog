@@ -78,6 +78,35 @@ class AiBotsTest extends TestCase
         return $this->site->days()->whereDate('day', '2026-10-21')->with('counts')->first();
     }
 
+    public function test_a_day_keeps_the_paths_each_bot_fetched_and_the_crawlers_tab_lists_them(): void
+    {
+        $folder = IngestLog::for($this->site)->folder();
+        File::ensureDirectoryExists($folder);
+        file_put_contents("{$folder}/access.log", implode("\n", [
+            '198.51.100.9 - - [20/Oct/2026:23:59:00 +0000] "GET / HTTP/1.1" 200 512 "-" "'.self::CHROME.'"',
+            $this->line('08:00:00', '192.0.2.1', '/api/status', 'Go-http-client/1.1'),
+            $this->line('08:01:00', '192.0.2.1', '/api/status', 'Go-http-client/1.1'),
+            $this->line('08:02:00', '192.0.2.1', '/api/status?x=1', 'Go-http-client/1.1'),
+            $this->line('09:00:00', '192.0.2.2', '/', 'curl/8.5.0'),
+            $this->line('09:00:01', '192.0.2.2', '/api/status', 'curl/8.5.0'),
+            '198.51.100.9 - - [22/Oct/2026:00:00:01 +0000] "GET / HTTP/1.1" 200 512 "-" "'.self::CHROME.'"',
+        ])."\n");
+        $this->artisan('edgelog:collect', ['site' => $this->site->uuid, '--day' => '2026-10-21', '--sync' => true])->assertSuccessful();
+        $day = $this->site->days()->whereDate('day', '2026-10-21')->with('counts')->first();
+
+        $this->assertSame(DayStatus::Verified, $day->status, implode("\n", $day->problems ?? []));
+        $this->assertSame(["Go-http-client\t/api/status" => 3, "curl\t/" => 1, "curl\t/api/status" => 1],
+            $day->counts->where('kind', CountKind::BotPath)->pluck('count', 'name')->sortKeys()->all());
+
+        $viewer = User::factory()->create();
+        $this->site->team->members()->attach($viewer, ['role' => 'viewer']);
+        $tab = fn (array $query = []) => $this->actingAs($viewer)->get(route('teams.sites.ai.crawlers', [$this->site->team, $this->site, 'days' => '7', ...$query]))->assertOk();
+
+        $tab()->assertSee('What bots fetch')->assertSeeInOrder(['/api/status', '4', 'Go-http-client 3, curl 1']);
+        $tab(['bot' => 'curl'])->assertSee('What curl fetches')->assertSeeInOrder(['/api/status', '1'])->assertDontSee('Go-http-client 3');
+        $tab(['bot' => 'nobody'])->assertSee('What bots fetch');
+    }
+
     public function test_robots_txt_is_read_as_google_reads_it(): void
     {
         $robots = RobotsTxt::parse("User-agent: *\nDisallow: /private/\nAllow: /private/open\n\nUser-agent: CCBot\nUser-agent: Bytespider\nDisallow: /\n\nUser-agent: GPTBot\nDisallow: /*.pdf\$\nSitemap: https://example.com/sitemap.xml");

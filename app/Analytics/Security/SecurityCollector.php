@@ -271,6 +271,7 @@ final class SecurityCollector
         $this->count(CountKind::SecurityCategory, $category);
         $this->count(CountKind::SecurityAnswer, $answered);
         $this->count(CountKind::SecurityPath, substr($path, 0, 200) ?: '/');
+        $this->count(CountKind::SecurityPathAnswer, (substr($path, 0, 200) ?: '/').SecurityNames::ANSWER_SEPARATOR.$answered);
 
         $pair['probes']++;
         $pair['categories'][$category] = ($pair['categories'][$category] ?? 0) + 1;

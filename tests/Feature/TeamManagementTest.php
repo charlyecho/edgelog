@@ -53,7 +53,7 @@ class TeamManagementTest extends TestCase
     {
         [$team, $users] = $this->teamWith(['viewer' => TeamRole::Viewer]);
 
-        $this->actingAs($users['viewer'])->get(route('teams.show', $team))->assertRedirect(route('teams.sites.index', $team));
+        $this->actingAs($users['viewer'])->get(route('teams.show', $team))->assertRedirect(route('teams.servers.index', $team));
         $this->actingAs($users['viewer'])->get(route('teams.sites.index', $team))->assertOk()->assertSee($team->name);
         $this->actingAs(User::factory()->create())->get(route('teams.show', $team))->assertForbidden();
         $this->actingAs(User::factory()->create())->get(route('teams.sites.index', $team))->assertForbidden();
@@ -92,7 +92,7 @@ class TeamManagementTest extends TestCase
         $team = Team::factory()->withMember($user, TeamRole::Viewer)->create();
         $this->actingAs($user)->get(route('teams.show', $team));
 
-        $this->actingAs($user)->get(route('dashboard'))->assertRedirect(route('teams.sites.index', $team));
+        $this->actingAs($user)->get(route('dashboard'))->assertRedirect(route('teams.servers.index', $team));
     }
 
     public function test_opening_a_team_of_someone_else_does_not_change_the_current_team(): void

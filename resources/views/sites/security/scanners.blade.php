@@ -49,6 +49,17 @@
     <x-top-list :title="__('What they looked for')" :unit="__('Each probe once, by the first kind it matches')" :rows="collect($categories)->map(fn ($count, $key) => ['label' => $labels[$key] ?? $key, 'count' => $count])->values()->all()"
         :total="$probes" tint="var(--bad)" :shown="8" />
 
+    <x-rows-table :title="__('Most probed paths')" :unit="__('What scanners asked for most, and what the server answered. A probe answered 2xx was served something: see what on Exposed.')"
+        :columns="[[__('Path'), 'left'], [__('Looked for'), 'left'], [__('Probes'), 'right'], [__('Answered'), 'left']]"
+        :rows="collect($probedPaths)->map(fn ($row) => [
+            ['label' => $row['path'], 'mono' => true],
+            $labels[$row['category']] ?? $row['category'],
+            number_format($row['probes']),
+            $row['answered'] === []
+                ? ['label' => __('Not kept'), 'tone' => 'muted']
+                : ['label' => $answered($row['answered']), 'tone' => isset($row['answered']['2xx']) ? 'warn' : null],
+        ])->all()" :shown="15" :empty="__('No probe in this period.')" />
+
     <x-rows-table :title="$everyone ? __('Every suspect') : __('Scanners')" :unit="__('By address, worst first. Addresses are kept :days days.', ['days' => config('analytics.security.kept_days')])"
         :columns="[[__('Address'), 'left'], [__('Country'), 'left'], [__('First seen'), 'left'], [__('Requests'), 'right'], [__('Probes'), 'right'], [__('Looked for'), 'left'], [__('Answered'), 'left'], [__('Signs'), 'left']]"
         :rows="collect($rows)->map(fn ($row) => [

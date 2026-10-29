@@ -23,6 +23,7 @@ enum CountKind: string
     case SearchEngine = 'search_engine';
     case SearchPage = 'search_page';
     case BotAgent = 'bot_agent';
+    case BotPath = 'bot_path';
     case OtherHost = 'other_host';
     case RevenuePaid = 'revenue_paid';
     case RevenueRefunded = 'revenue_refunded';
@@ -45,6 +46,7 @@ enum CountKind: string
     case SecurityCategory = 'security_category';
     case SecurityAnswer = 'security_answer';
     case SecurityPath = 'security_path';
+    case SecurityPathAnswer = 'security_path_answer';
     case SecurityInjection = 'security_injection';
     case SecurityFake = 'security_fake';
     case SecurityFakePage = 'security_fake_page';
@@ -84,7 +86,7 @@ enum CountKind: string
      *
      * @var array<string, int>
      */
-    public const array KEEP = ['crawler_path' => 2000, 'crawler_issue' => 1000, 'health_not_found_from' => 1000,
+    public const array KEEP = ['crawler_path' => 2000, 'bot_path' => 1000, 'security_path_answer' => 300, 'crawler_issue' => 1000, 'health_not_found_from' => 1000,
         'health_page_ms' => 2000, 'health_page_timed' => 2000, 'health_error_page' => 1000];
 
     /**

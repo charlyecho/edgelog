@@ -33,6 +33,9 @@
     $probes = $bots->probes;
     $botNames = $sorted($period->counts(CountKind::BotAgent));
     $previews = array_filter($botNames, fn (string $name) => str_starts_with($name, 'link preview: '), ARRAY_FILTER_USE_KEY);
+    // The two bots that asked for a path most, and how many others did.
+    $botsCell = fn (array $bots) => collect($bots)->take(2)->map(fn ($count, $name) => $name.' '.number_format($count))->implode(', ')
+        .(count($bots) > 2 ? ' +'.(count($bots) - 2) : '');
 
     $nameCell = fn (string $name, bool $fetcher = false) => $name === $others ? ['label' => __('(all others)')] : ['label' => $name, 'tile' => Labels::owner($name), 'note' => $fetcher ? __('user fetcher') : null];
     $robotsCell = function (string $name) use ($verdicts) {
@@ -85,6 +88,31 @@
             :total="$search->requests" tint="var(--group-search_engines)" />
         <x-top-list :title="__('Bots and scanners by name')" :unit="__('requests')" :rows="collect($botNames)->map(fn ($count, $name) => ['label' => $name === $others ? __('(all others)') : (string) $name, 'count' => $count])->values()->all()"
             :total="$bots->requests" tint="var(--group-bots)" :shown="10" />
+    </div>
+
+    {{-- What bots fetch: every path they asked for, or one bot's. --}}
+    <div class="grid gap-3">
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px]">
+            <span class="font-semibold text-ink-2">{{ __('Bot') }}</span>
+            <div class="flex flex-wrap gap-1.5">
+                @foreach (['' => __('Every bot'), ...collect($botNames)->except($others)->keys()->take(12)->mapWithKeys(fn ($name) => [(string) $name => (string) $name])->all(), ...($bot !== null ? [$bot => $bot] : [])] as $key => $label)
+                    <a href="{{ request()->fullUrlWithQuery(['bot' => $key === '' ? null : $key]) }}" @class([
+                        'inline-flex h-7 max-w-64 items-center truncate rounded-full border px-2.5 no-underline',
+                        'border-ink bg-ink text-surface' => ($bot ?? '') === $key,
+                        'border-rule bg-surface text-ink hover:border-ink-3' => ($bot ?? '') !== $key,
+                    ])>{{ $label }}</a>
+                @endforeach
+            </div>
+        </div>
+
+        <x-rows-table :title="$bot === null ? __('What bots fetch') : __('What :bot fetches', ['bot' => $bot])"
+            :unit="__('The paths bots and scanners asked for most. Each day keeps its 1,000 busiest bot and path pairs; days counted before paths were kept by bot are left out.')"
+            :columns="$bot === null ? [[__('Path'), 'left'], [__('Requests'), 'right'], [__('Bots'), 'left']] : [[__('Path'), 'left'], [__('Requests'), 'right']]"
+            :rows="collect($botPaths)->map(fn ($row) => [
+                ['label' => $row['path'], 'mono' => true],
+                number_format($row['requests']),
+                ...($bot === null ? [$botsCell($row['bots'])] : []),
+            ])->all()" :shown="15" :empty="__('Not recorded for this period: count its days again.')" />
     </div>
 
     <x-rows-table :title="__('What each crawler costs')" :unit="__('Per crawler: requests, bytes the server sent, its time per request (when the log records it), failed requests (4xx or 5xx), distinct paths and how often it fetched them again. Each day keeps its 50 busiest names per group; the rest are one “(all others)” row.')"

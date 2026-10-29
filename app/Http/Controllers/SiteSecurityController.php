@@ -72,6 +72,7 @@ class SiteSecurityController extends Controller
         return $this->tab($request, $team, $site, 'scanners', fn (SecurityPeriod $security) => [
             'category' => $category,
             'everyone' => $everyone,
+            'probedPaths' => $security->probedPaths($category),
             'rows' => $security->byAddress(fn ($suspect) => ($everyone || $suspect->probes > 0)
                 && ($category === null || isset($suspect->categories[$category]))),
         ]);

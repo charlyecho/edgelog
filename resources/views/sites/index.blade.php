@@ -27,19 +27,21 @@
                         </span>
                     </span>
 
-                    @if (($alerts[$site->id] ?? []) !== [])
-                        <span class="mt-3 flex flex-wrap gap-1.5">
-                            @foreach ($alerts[$site->id] as $alert)
-                                <span title="{{ $alert['detail'] }}" @class([
-                                    'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-semibold',
-                                    'border-bad/40 bg-bad/10 text-bad' => $alert['tone'] === 'bad',
-                                    'border-warn/40 bg-warn/10 text-warn' => $alert['tone'] === 'warn',
-                                    'border-rule text-ink-3' => $alert['tone'] === 'muted',
-                                ])>
-                                    <span @class(['size-1.5 rounded-full', 'bg-bad' => $alert['tone'] === 'bad', 'bg-warn' => $alert['tone'] === 'warn', 'bg-ink-3' => $alert['tone'] === 'muted'])></span>
-                                    {{ $alert['label'] }}
-                                </span>
-                            @endforeach
+                    <x-alert-chips :alerts="$alerts[$site->id] ?? []" class="mt-3" />
+
+                    @if ($site->server && array_key_exists($site->server_id, $serverAlerts))
+                        @php($onServer = array_values(array_filter($serverAlerts[$site->server_id] ?? [], fn (array $alert) => $alert['tone'] !== 'muted')))
+                        <span title="{{ collect($onServer)->pluck('label')->join(' · ') }}" @class([
+                            'mt-2 flex items-center gap-1.5 text-xs',
+                            'text-ink-3' => $onServer === [],
+                            'font-semibold text-bad' => ($onServer[0]['tone'] ?? null) === 'bad',
+                            'font-semibold text-warn' => ($onServer[0]['tone'] ?? null) === 'warn',
+                        ])>
+                            <x-icon name="server" class="size-3.5" />
+                            <span class="truncate">{{ $site->server->name() }}</span>
+                            @if ($onServer !== [])
+                                <span class="flex-none">· {{ trans_choice(':count server alert|:count server alerts', count($onServer)) }}</span>
+                            @endif
                         </span>
                     @endif
 

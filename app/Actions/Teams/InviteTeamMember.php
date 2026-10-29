@@ -16,21 +16,30 @@ class InviteTeamMember
     /**
      * Invite an email address to the team and mail them the link.
      *
-     * A newer invitation for the same address replaces the older one.
+     * A viewer may be limited to the sites and servers given, which they get
+     * as they accept. A newer invitation for the same address replaces the
+     * older one.
      * Only the hash of the token is stored, so the link is returned to be
      * shown once to the person who sent it.
+     *
+     * @param  list<int>  $siteIds
+     * @param  list<int>  $serverIds
      */
-    public function handle(Team $team, User $inviter, string $email, TeamRole $role): string
+    public function handle(Team $team, User $inviter, string $email, TeamRole $role, bool $limited = false, array $siteIds = [], array $serverIds = []): string
     {
         $token = Str::random(48);
         $email = Str::lower($email);
+        $limited = $limited && $role === TeamRole::Viewer;
 
-        $invitation = DB::transaction(function () use ($team, $inviter, $email, $role, $token) {
+        $invitation = DB::transaction(function () use ($team, $inviter, $email, $role, $limited, $siteIds, $serverIds, $token) {
             $team->invitations()->where('email', $email)->delete();
 
             return $team->invitations()->create([
                 'email' => $email,
                 'role' => $role,
+                'limited' => $limited,
+                'site_ids' => $limited ? $siteIds : null,
+                'server_ids' => $limited ? $serverIds : null,
                 'token_hash' => TeamInvitation::hashToken($token),
                 'expires_at' => now()->addDays(TeamInvitation::VALID_DAYS),
                 'invited_by' => $inviter->getKey(),

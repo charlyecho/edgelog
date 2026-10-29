@@ -3,6 +3,7 @@
 use App\Http\Controllers\AcceptTeamInvitationController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\ServerController;
 use App\Http\Controllers\ShipperDownloadController;
 use App\Http\Controllers\SiteAiController;
 use App\Http\Controllers\SiteController;
@@ -20,7 +21,9 @@ use App\Http\Controllers\SiteTokenController;
 use App\Http\Controllers\SiteTrafficController;
 use App\Http\Controllers\SiteUsersController;
 use App\Http\Controllers\TeamController;
+use App\Http\Controllers\TeamIconController;
 use App\Http\Controllers\TeamInvitationController;
+use App\Http\Controllers\TeamMemberAccessController;
 use App\Http\Controllers\TeamMemberController;
 use App\Http\Middleware\RememberCurrentTeam;
 use Illuminate\Support\Facades\Route;
@@ -49,13 +52,23 @@ Route::middleware('auth')->group(function () {
         Route::get('/teams/{team}/settings', [TeamController::class, 'edit'])->name('teams.edit');
         Route::put('/teams/{team}', [TeamController::class, 'update'])->name('teams.update');
         Route::delete('/teams/{team}', [TeamController::class, 'destroy'])->name('teams.destroy');
+        Route::get('/teams/{team}/icon', [TeamIconController::class, 'show'])->name('teams.icon');
+        Route::post('/teams/{team}/icon', [TeamIconController::class, 'store'])->name('teams.icon.store');
+        Route::delete('/teams/{team}/icon', [TeamIconController::class, 'destroy'])->name('teams.icon.destroy');
 
         Route::put('/teams/{team}/members/{member}', [TeamMemberController::class, 'update'])->name('teams.members.update');
         Route::delete('/teams/{team}/members/{member}', [TeamMemberController::class, 'destroy'])->name('teams.members.destroy');
+        Route::get('/teams/{team}/members/{member}/access', [TeamMemberAccessController::class, 'edit'])->name('teams.members.access.edit');
+        Route::put('/teams/{team}/members/{member}/access', [TeamMemberAccessController::class, 'update'])->name('teams.members.access.update');
 
         Route::scopeBindings()->group(function () {
             Route::post('/teams/{team}/invitations', [TeamInvitationController::class, 'store'])->name('teams.invitations.store');
             Route::delete('/teams/{team}/invitations/{invitation}', [TeamInvitationController::class, 'destroy'])->name('teams.invitations.destroy');
+
+            Route::get('/teams/{team}/servers', [ServerController::class, 'index'])->name('teams.servers.index');
+            Route::get('/teams/{team}/servers/{server}', [ServerController::class, 'show'])->name('teams.servers.show');
+            Route::put('/teams/{team}/servers/{server}', [ServerController::class, 'update'])->name('teams.servers.update');
+            Route::delete('/teams/{team}/servers/{server}', [ServerController::class, 'destroy'])->name('teams.servers.destroy');
 
             Route::get('/teams/{team}/sites', [SiteController::class, 'index'])->name('teams.sites.index');
             Route::get('/teams/{team}/sites/create', [SiteController::class, 'create'])->name('teams.sites.create');
@@ -94,7 +107,8 @@ Route::middleware('auth')->group(function () {
             Route::get('/teams/{team}/sites/{site}/site/not-found', [SiteHealthController::class, 'notFound'])->name('teams.sites.site.not-found');
             Route::get('/teams/{team}/sites/{site}/site/speed', [SiteHealthController::class, 'speed'])->name('teams.sites.site.speed');
             Route::get('/teams/{team}/sites/{site}/site/quality', [SiteHealthController::class, 'quality'])->name('teams.sites.site.quality');
-            Route::get('/teams/{team}/sites/{site}/site/server', SiteServerController::class)->name('teams.sites.site.server');
+            Route::get('/teams/{team}/sites/{site}/site/server', [SiteServerController::class, 'show'])->name('teams.sites.site.server');
+            Route::put('/teams/{team}/sites/{site}/server', [SiteServerController::class, 'update'])->name('teams.sites.server.update');
             Route::get('/teams/{team}/sites/{site}/site/errors', [SiteErrorsController::class, 'index'])->name('teams.sites.site.errors');
             Route::get('/teams/{team}/sites/{site}/site/errors/{error}', [SiteErrorsController::class, 'show'])->name('teams.sites.site.errors.show');
             Route::put('/teams/{team}/sites/{site}/site/errors/{error}', [SiteErrorsController::class, 'update'])->name('teams.sites.site.errors.update');

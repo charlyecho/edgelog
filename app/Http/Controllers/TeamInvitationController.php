@@ -21,6 +21,9 @@ class TeamInvitationController extends Controller
             $request->user(),
             $request->validated('email'),
             $request->role(),
+            $request->isLimited(),
+            $request->siteIds(),
+            $request->serverIds(),
         );
 
         return back()

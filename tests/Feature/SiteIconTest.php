@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\TeamRole;
 use App\Jobs\FetchSiteIcon;
 use App\Models\Site;
 use App\Models\User;
@@ -144,5 +145,43 @@ class SiteIconTest extends TestCase
         $this->site->refresh()->storeIcon(self::PNG, uploaded: false);
         $this->site->delete();
         Storage::disk('local')->assertMissing($path);
+    }
+
+    public function test_a_manager_gives_the_team_an_icon_its_members_see(): void
+    {
+        Storage::fake('local');
+        $team = $this->site->team;
+        $admin = User::factory()->create();
+        $viewer = User::factory()->create();
+        $team->members()->attach($admin, ['role' => TeamRole::Admin->value]);
+        $team->members()->attach($viewer, ['role' => TeamRole::Viewer->value]);
+
+        $this->actingAs($viewer)->post(route('teams.icon.store', $team), ['icon' => UploadedFile::fake()->createWithContent('icon.png', self::PNG)])->assertForbidden();
+
+        $this->actingAs($admin)
+            ->post(route('teams.icon.store', $team), ['icon' => UploadedFile::fake()->createWithContent('icon.png', self::PNG)])
+            ->assertSessionHasNoErrors();
+
+        $team->refresh();
+        $this->assertSame("team-icons/{$team->uuid}.png", $team->icon_path);
+        $this->actingAs($viewer)->get(route('teams.servers.index', $team))->assertSee($team->iconUrl(), false);
+        $this->actingAs($viewer)->get($team->iconUrl())->assertOk()->assertHeader('Content-Type', 'image/png');
+        $this->actingAs(User::factory()->create())->get($team->iconUrl())->assertForbidden();
+
+        $this->actingAs($admin)->delete(route('teams.icon.destroy', $team))->assertSessionHasNoErrors();
+        $this->assertNull($team->fresh()->icon_path);
+        Storage::disk('local')->assertMissing("team-icons/{$team->uuid}.png");
+    }
+
+    public function test_a_team_icon_must_be_an_image(): void
+    {
+        $admin = User::factory()->create();
+        $this->site->team->members()->attach($admin, ['role' => TeamRole::Owner->value]);
+
+        $this->actingAs($admin)
+            ->post(route('teams.icon.store', $this->site->team), ['icon' => UploadedFile::fake()->createWithContent('icon.png', 'not an image')])
+            ->assertSessionHasErrors('icon');
+
+        $this->assertNull($this->site->team->fresh()->icon_path);
     }
 }

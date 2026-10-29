@@ -119,6 +119,34 @@ class SecurityTest extends TestCase
         $this->assertNull($day->suspects()->where('address', '198.51.100.7')->first());
     }
 
+    public function test_each_probed_path_keeps_what_the_server_answered_it(): void
+    {
+        $this->site->update(['own_paths' => ['/admin/*']]);
+
+        $day = $this->collect();
+
+        $this->assertSame([
+            "/\t2xx" => 1,
+            "/.env\t4xx" => 1,
+            "/.git/config\t2xx" => 1,
+            "/phpmyadmin/\t2xx" => 1,
+            "/wp-login.php\t2xx" => 1,
+            "/xmlrpc.php\t2xx" => 1,
+        ], $day->counts->where('kind', CountKind::SecurityPathAnswer)->pluck('count', 'name')->sortKeys()->all());
+    }
+
+    public function test_the_scanners_tab_lists_the_most_probed_paths_with_their_answers(): void
+    {
+        $this->site->update(['own_paths' => ['/admin/*']]);
+        $this->collect();
+        $viewer = User::factory()->create();
+        $this->site->team->members()->attach($viewer, ['role' => 'viewer']);
+        $tab = fn (array $query = []) => $this->actingAs($viewer)->get(route('teams.sites.security.scanners', [$this->site->team, $this->site, 'days' => '7', ...$query]))->assertOk();
+
+        $tab()->assertSee('Most probed paths')->assertSeeInOrder(['/.env', 'Secret files (.env, keys)', '4xx 1'])->assertSee('/wp-login.php');
+        $tab(['category' => 'secrets'])->assertSee('/.git/config')->assertDontSee('/wp-login.php');
+    }
+
     public function test_without_its_own_paths_the_owners_admin_is_a_probe(): void
     {
         $day = $this->collect();

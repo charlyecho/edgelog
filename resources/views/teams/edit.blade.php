@@ -30,6 +30,40 @@
             @endcan
         </x-card>
 
+        <x-card :title="__('Icon')" :description="__('Shown next to the team\'s name.')">
+            <div class="flex flex-wrap items-center gap-4">
+                <x-tile :label="$team->name" :seed="$team->uuid" :src="$team->iconUrl()" size="size-12 text-xl" />
+                <p class="text-ink-2">
+                    {{ $team->icon_path === null ? __('No icon: the team is shown with its initial.') : __('Uploaded :when.', ['when' => $team->icon_changed_at->diffForHumans()]) }}
+                </p>
+            </div>
+
+            @can('update', $team)
+                <form method="POST" action="{{ route('teams.icon.store', $team) }}" enctype="multipart/form-data" class="mt-4 grid gap-1.5">
+                    @csrf
+                    <label class="grid gap-1.5 text-[13px] font-medium text-ink-2">
+                        {{ __('Upload an icon') }}
+                        <span class="flex flex-wrap items-center gap-3">
+                            <input type="file" name="icon" accept=".png,.jpg,.jpeg,.gif,.webp,.svg,.ico" required class="min-w-0 flex-1 text-[13px] font-normal text-ink file:mr-3 file:h-8 file:cursor-pointer file:rounded-lg file:border file:border-rule file:bg-surface file:px-3 file:text-[13px] file:font-semibold file:text-ink hover:file:border-ink-3">
+                            <x-button variant="secondary" size="sm">{{ __('Upload') }}</x-button>
+                        </span>
+                        <span class="text-xs font-normal text-ink-3">{{ __('PNG, JPEG, GIF, WebP, SVG or ICO, :size KB at most. A square image of 64 pixels or more looks best.', ['size' => \App\Models\Team::ICON_MAX_BYTES / 1024]) }}</span>
+                        @error('icon')
+                            <span class="text-[13px] font-normal text-bad">{{ $message }}</span>
+                        @enderror
+                    </label>
+                </form>
+
+                @if ($team->icon_path !== null)
+                    <form method="POST" action="{{ route('teams.icon.destroy', $team) }}" class="mt-4 border-t border-grid pt-4">
+                        @csrf
+                        @method('DELETE')
+                        <x-button variant="danger" size="sm">{{ __('Remove the icon') }}</x-button>
+                    </form>
+                @endif
+            @endcan
+        </x-card>
+
         <x-card :title="__('Members')" :description="trans_choice(':count member. Your role: :role.|:count members. Your role: :role.', $team->members->count(), ['role' => $role->label()])" flush>
             @error('role')
                 <p class="border-b border-rule px-4 py-2 text-bad">{{ $message }}</p>
@@ -42,6 +76,7 @@
                             <th class="px-4 py-2.5 font-semibold">{{ __('Email') }}</th>
                             <th class="px-4 py-2.5 font-semibold">{{ __('Name') }}</th>
                             <th class="px-4 py-2.5 font-semibold">{{ __('Role') }}</th>
+                            <th class="px-4 py-2.5 font-semibold">{{ __('Access') }}</th>
                             <th class="px-4 py-2.5 font-semibold">{{ __('Two-step sign-in') }}</th>
                             <th class="px-4 py-2.5"><span class="sr-only">{{ __('Actions') }}</span></th>
                         </tr>
@@ -72,6 +107,19 @@
                                     @else
                                         {{ $member->membership->role->label() }}
                                     @endcan
+                                </td>
+                                <td class="px-4 py-3">
+                                    @php($grant = $grants->get($member->id))
+                                    @if ($grant?->isLimited())
+                                        <span class="font-semibold">{{ trans_choice(':count site|:count sites', $grant->sites_count) }}, {{ trans_choice(':count server|:count servers', $grant->servers_count) }}</span>
+                                    @else
+                                        <span class="text-ink-2">{{ __('Everything') }}</span>
+                                    @endif
+                                    @if ($member->membership->role === \App\Enums\TeamRole::Viewer)
+                                        @can('updateMember', [$team, $member])
+                                            <a href="{{ route('teams.members.access.edit', [$team, $member]) }}" class="ml-1 text-[13px] text-ink-2 underline hover:text-ink">{{ __('Change') }}</a>
+                                        @endcan
+                                    @endif
                                 </td>
                                 <td class="px-4 py-3">
                                     <span class="inline-flex h-6 items-center rounded-full border border-rule px-2.5 text-[12px] font-semibold text-ink-2">
@@ -113,6 +161,9 @@
                                     <div>
                                         <span class="font-mono text-[13px]">{{ $invitation->email }}</span>
                                         <span class="text-ink-3">· {{ $invitation->role->label() }}</span>
+                                        @if ($invitation->limited)
+                                            <span class="text-ink-3">· {{ trans_choice(':count site|:count sites', count($invitation->site_ids ?? [])) }}, {{ trans_choice(':count server|:count servers', count($invitation->server_ids ?? [])) }}</span>
+                                        @endif
                                         <span @class(['text-ink-3', 'text-bad' => $invitation->expires_at->isPast()])>
                                             · {{ $invitation->expires_at->isPast() ? __('expired') : __('expires :when', ['when' => $invitation->expires_at->diffForHumans()]) }}
                                         </span>
@@ -130,15 +181,23 @@
             </section>
 
             <x-card :title="__('Invite someone')" :description="__('They get a mail with a link to create an account, or to join with the account they already have. A new invitation to the same address replaces the previous one.')">
-                <form method="POST" action="{{ route('teams.invitations.store', $team) }}" class="grid items-end gap-3 sm:grid-cols-[1fr_1fr_auto]">
+                <form method="POST" action="{{ route('teams.invitations.store', $team) }}" class="grid gap-4">
                     @csrf
-                    <x-input :label="__('Email')" name="email" type="email" placeholder="name@example.com" required />
-                    <x-select :label="__('Role')" name="role">
-                        @foreach ($role->assignableRoles() as $assignable)
-                            <option value="{{ $assignable->value }}" @selected(old('role', 'viewer') === $assignable->value)>{{ $assignable->label() }}</option>
-                        @endforeach
-                    </x-select>
-                    <x-button>{{ __('Send invite') }}</x-button>
+                    <div class="grid items-end gap-3 sm:grid-cols-[1fr_1fr_auto]">
+                        <x-input :label="__('Email')" name="email" type="email" placeholder="name@example.com" required />
+                        <x-select :label="__('Role')" name="role">
+                            @foreach ($role->assignableRoles() as $assignable)
+                                <option value="{{ $assignable->value }}" @selected(old('role', 'viewer') === $assignable->value)>{{ $assignable->label() }}</option>
+                            @endforeach
+                        </x-select>
+                        <x-button>{{ __('Send invite') }}</x-button>
+                    </div>
+
+                    <details class="rounded-lg border border-rule px-3 py-2.5" @if (old('access') === 'limited') open @endif>
+                        <summary class="cursor-pointer font-semibold">{{ __('What a viewer may see') }}</summary>
+                        <p class="mt-1 mb-3 text-[13px] text-ink-2">{{ __('Only for a viewer: owners and admins always see everything.') }}</p>
+                        <x-access-fields :team="$team" :sites="$sites" :servers="$servers" />
+                    </details>
                 </form>
 
                 <x-slot:after>

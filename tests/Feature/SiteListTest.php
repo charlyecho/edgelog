@@ -2,11 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Analytics\ServerAlerts;
 use App\Analytics\SiteAlerts;
 use App\Analytics\SiteSparklines;
 use App\Enums\DayStatus;
 use App\Enums\IngestRefusalReason;
 use App\Enums\TrafficGroup;
+use App\Models\Server;
 use App\Models\Site;
 use App\Models\Team;
 use App\Models\User;
@@ -65,9 +67,9 @@ class SiteListTest extends TestCase
      *
      * @param  array<string, mixed>  $changes
      */
-    private function storeMinute(Site $site, string $minute, array $changes = []): void
+    private function storeMinute(Server $server, string $minute, array $changes = []): void
     {
-        $site->metricMinutes()->create([
+        $server->metricMinutes()->create([
             'minute' => $minute,
             'cpu' => 10,
             'iowait' => 0,
@@ -93,15 +95,31 @@ class SiteListTest extends TestCase
         return array_column(SiteAlerts::for(collect([$site]))[$site->id], 'label');
     }
 
+    /**
+     * @return list<string>
+     */
+    private function serverLabels(Server $server): array
+    {
+        return array_column(ServerAlerts::for(collect([$server]))[$server->id], 'label');
+    }
+
     public function test_a_healthy_site_has_no_alert(): void
     {
         $this->travelTo('2026-10-24 12:00:00');
         $site = Site::factory()->create();
         $site->ingestStatus()->create(['last_batch_at' => now()->subMinute(), 'last_contact_at' => now()->subMinute()]);
         $site->days()->create(['day' => '2026-10-23', 'timezone' => 'UTC', 'status' => DayStatus::Verified, 'collected_at' => now()->subHours(10)]);
-        $this->storeMinute($site, '2026-10-24 11:59:00');
 
         $this->assertSame([], $this->labels($site));
+    }
+
+    public function test_a_healthy_server_has_no_alert(): void
+    {
+        $this->travelTo('2026-10-24 12:00:00');
+        $server = Server::factory()->create();
+        $this->storeMinute($server, '2026-10-24 11:59:00');
+
+        $this->assertSame([], $this->serverLabels($server));
     }
 
     public function test_a_site_without_log_says_so(): void
@@ -142,17 +160,16 @@ class SiteListTest extends TestCase
     public function test_a_busy_or_full_server_is_an_alert(): void
     {
         $this->travelTo('2026-10-24 12:00:30');
-        $site = Site::factory()->create();
-        $site->ingestStatus()->create(['last_batch_at' => now()->subMinute()]);
-        $this->storeMinute($site, '2026-10-24 11:58:00', ['cpu' => 90]);
-        $this->storeMinute($site, '2026-10-24 12:00:00', [
+        $server = Server::factory()->create();
+        $this->storeMinute($server, '2026-10-24 11:58:00', ['cpu' => 90]);
+        $this->storeMinute($server, '2026-10-24 12:00:00', [
             'cpu' => 96,
             'load5' => 6.2,
             'memory_available' => 1024 ** 3,
             'disks' => [['mount' => '/', 'size' => 100, 'used' => 80, 'free' => 20], ['mount' => '/boot', 'size' => 100, 'used' => 10, 'free' => 90]],
         ]);
 
-        $alerts = SiteAlerts::for(collect([$site]))[$site->id];
+        $alerts = ServerAlerts::for(collect([$server]))[$server->id];
 
         $this->assertSame(['CPU 93%', 'Load 6.2', 'Memory 88%', 'Disk / 80%'], array_column($alerts, 'label'));
         $this->assertSame(['bad', 'bad', 'warn', 'warn'], array_column($alerts, 'tone'));
@@ -161,11 +178,27 @@ class SiteListTest extends TestCase
     public function test_a_quiet_server_only_says_it_is_quiet(): void
     {
         $this->travelTo('2026-10-24 12:00:00');
-        $site = Site::factory()->create();
-        $site->ingestStatus()->create(['last_batch_at' => now()->subMinute()]);
-        $this->storeMinute($site, '2026-10-24 11:40:00', ['cpu' => 99]);
+        $server = Server::factory()->create();
+        $this->storeMinute($server, '2026-10-24 11:40:00', ['cpu' => 99]);
 
-        $this->assertSame(['Server quiet for 20m'], $this->labels($site));
+        $this->assertSame(['Server quiet for 20m'], $this->serverLabels($server));
+    }
+
+    public function test_the_list_tells_the_server_of_each_site_once_with_its_alerts(): void
+    {
+        $this->travelTo('2026-10-24 12:00:00');
+        $user = User::factory()->create();
+        $team = Team::factory()->withMember($user)->create();
+        $server = Server::factory()->for($team)->create(['hostname' => 'web-1']);
+        Site::factory()->for($team)->for($server)->count(2)->create();
+        $this->storeMinute($server, '2026-10-24 11:59:00', ['memory_available' => 0]);
+
+        $this->actingAs($user)
+            ->get(route('teams.sites.index', $team))
+            ->assertOk()
+            ->assertSee('web-1')
+            ->assertSee('1 server alert')
+            ->assertSee('title="Memory 100%"', false);
     }
 
     public function test_the_list_shows_each_sites_alerts(): void
@@ -181,5 +214,26 @@ class SiteListTest extends TestCase
             ->assertOk()
             ->assertSee('No log for 40m')
             ->assertSee('Is edgelog-ship still running?');
+    }
+
+    public function test_the_rail_lists_the_sites_under_their_server_with_the_open_ones_sections(): void
+    {
+        $user = User::factory()->create();
+        $team = Team::factory()->withMember($user)->create();
+        $server = Server::factory()->for($team)->create(['hostname' => 'web-1']);
+        Site::factory()->for($team)->for($server)->create(['name' => 'b.example.com']);
+        $current = Site::factory()->for($team)->for($server)->create(['name' => 'a.example.com']);
+        Site::factory()->for($team)->create(['name' => 'alone.example.com']);
+
+        $this->actingAs($user)
+            ->get(route('teams.edit', $team))
+            ->assertOk()
+            ->assertSeeInOrder(['web-1', 'a.example.com', 'b.example.com', 'No known server', 'alone.example.com', 'Team settings'])
+            ->assertDontSee('Leads &amp; sales', false);
+
+        $this->actingAs($user)
+            ->get(route('teams.sites.traffic.visitors', [$team, $current]))
+            ->assertOk()
+            ->assertSeeInOrder(['web-1', 'a.example.com', 'Overview', 'Traffic', 'Leads &amp; sales', 'b.example.com', 'No known server'], false);
     }
 }

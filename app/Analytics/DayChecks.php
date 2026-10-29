@@ -71,6 +71,7 @@ final class DayChecks
             CountKind::SearchEngine->value => $figures->group(TrafficGroup::SearchEngines)->requests,
             CountKind::SearchPage->value => $figures->group(TrafficGroup::SearchEngines)->requests,
             CountKind::BotAgent->value => $figures->group(TrafficGroup::Bots)->requests,
+            CountKind::BotPath->value => $figures->group(TrafficGroup::Bots)->requests,
             CountKind::OtherHost->value => $figures->otherHosts,
         ];
 
@@ -183,6 +184,7 @@ final class DayChecks
         foreach ([
             CountKind::SecurityCategory->value => $security['probes'],
             CountKind::SecurityAnswer->value => $security['probes'],
+            CountKind::SecurityPathAnswer->value => $security['probes'],
             CountKind::SecurityInjection->value => $security['injection'],
             CountKind::SecurityFake->value => $security['fake_requests'],
         ] as $kind => $parent) {

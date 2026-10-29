@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\TeamRole;
+use App\Models\Server;
 use App\Models\Site;
 use App\Models\Team;
 use App\Models\User;
@@ -136,13 +137,14 @@ class SiteManagementTest extends TestCase
     {
         [$admin, $team] = $this->memberOf(TeamRole::Admin);
         $target = Team::factory()->withMember($admin, TeamRole::Owner)->create();
-        $site = Site::factory()->for($team)->create();
+        $site = Site::factory()->for($team)->for(Server::factory()->for($team))->create();
 
         $this->actingAs($admin)
             ->put(route('teams.sites.team.update', [$team, $site]), ['team' => $target->uuid])
             ->assertRedirect(route('teams.sites.edit', [$target, $site]));
 
         $this->assertTrue($site->fresh()->team->is($target));
+        $this->assertNull($site->fresh()->server_id, 'the server stays with the team it belongs to');
     }
 
     public function test_a_site_cannot_be_moved_to_a_team_where_the_user_is_viewer(): void

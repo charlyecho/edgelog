@@ -2,8 +2,8 @@
 
 namespace App\Analytics\Server;
 
-use App\Models\SiteMetricHour;
-use App\Models\SiteMetricMinute;
+use App\Models\ServerMetricHour;
+use App\Models\ServerMetricMinute;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Enumerable;
@@ -26,39 +26,39 @@ final class MetricRollup
     {
         $until = $now->startOfHour();
         $oldest = $now->subDays((int) config('ingest.metrics_minute_days'))->startOfHour();
-        $last = SiteMetricHour::query()->max('hour');
+        $last = ServerMetricHour::query()->max('hour');
         $from = $last === null ? $oldest : CarbonImmutable::parse($last)->max($oldest);
         $written = 0;
 
-        SiteMetricMinute::query()
+        ServerMetricMinute::query()
             ->where('minute', '>=', $from)
             ->where('minute', '<', $until)
-            ->orderBy('site_id')
+            ->orderBy('server_id')
             ->orderBy('minute')
-            ->with('site')
+            ->with('server')
             ->lazy()
-            ->chunkWhile(fn (SiteMetricMinute $minute, int $key, Enumerable $chunk) => $chunk->last()->site_id === $minute->site_id
+            ->chunkWhile(fn (ServerMetricMinute $minute, int $key, Enumerable $chunk) => $chunk->last()->server_id === $minute->server_id
                 && $chunk->last()->minute->startOfHour()->equalTo($minute->minute->startOfHour()))
             ->each(function (Enumerable $minutes) use (&$written) {
                 self::writeHour($minutes->collect());
                 $written++;
             });
 
-        SiteMetricMinute::query()->where('minute', '<', $oldest)->delete();
-        SiteMetricHour::query()->where('hour', '<', $now->subDays((int) config('ingest.metrics_hour_days')))->delete();
+        ServerMetricMinute::query()->where('minute', '<', $oldest)->delete();
+        ServerMetricHour::query()->where('hour', '<', $now->subDays((int) config('ingest.metrics_hour_days')))->delete();
 
         return $written;
     }
 
     /**
-     * @param  Collection<int, SiteMetricMinute>  $minutes  one site's minutes of one hour
+     * @param  Collection<int, ServerMetricMinute>  $minutes  one server's minutes of one hour
      */
     private static function writeHour(Collection $minutes): void
     {
         $last = $minutes->last();
-        $memory = $minutes->map(fn (SiteMetricMinute $minute) => $minute->memoryUsed());
+        $memory = $minutes->map(fn (ServerMetricMinute $minute) => $minute->memoryUsed());
 
-        $last->site->metricHours()->updateOrCreate(
+        $last->server->metricHours()->updateOrCreate(
             ['hour' => $last->minute->startOfHour()],
             [
                 'samples' => $minutes->count(),
@@ -72,7 +72,7 @@ final class MetricRollup
                 'memory_used_average' => (int) round($memory->avg()),
                 'memory_used_peak' => $memory->max(),
                 'swap_total' => $last->swap_total,
-                'swap_used_peak' => $minutes->map(fn (SiteMetricMinute $minute) => $minute->swapUsed())->max(),
+                'swap_used_peak' => $minutes->map(fn (ServerMetricMinute $minute) => $minute->swapUsed())->max(),
                 'disk_read' => self::rate($minutes, 'disk_read'),
                 'disk_write' => self::rate($minutes, 'disk_write'),
                 'network_in' => self::rate($minutes, 'network_in'),
@@ -85,7 +85,7 @@ final class MetricRollup
     /**
      * The average of the minutes that have the figure, or null when none has.
      *
-     * @param  Collection<int, SiteMetricMinute>  $minutes
+     * @param  Collection<int, ServerMetricMinute>  $minutes
      */
     private static function average(Collection $minutes, string $key): ?float
     {
@@ -95,7 +95,7 @@ final class MetricRollup
     }
 
     /**
-     * @param  Collection<int, SiteMetricMinute>  $minutes
+     * @param  Collection<int, ServerMetricMinute>  $minutes
      */
     private static function rate(Collection $minutes, string $key): ?int
     {

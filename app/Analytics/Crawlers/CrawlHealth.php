@@ -52,6 +52,8 @@ final class CrawlHealth
         $days = $this->period->dailyCounts(CountKind::CrawlerPath);
         $issues = $this->period->dailyCounts(CountKind::CrawlerIssue);
         $dates = array_keys($this->period->days);
+        $verified = $this->period->verified();
+        $fetched = [];
 
         foreach ($days as $date => $counts) {
             foreach ($counts as $key => $count) {
@@ -65,6 +67,10 @@ final class CrawlHealth
                 $crawler['requests'] += $count;
                 $crawler['pages'][$path] = ($crawler['pages'][$path] ?? 0) + $count;
                 unset($crawler);
+
+                if (isset($this->sitemap[self::key($path)])) {
+                    $fetched[$label][$date][self::key($path)] = true;
+                }
 
                 $page = $this->pages[$path] ?? ['requests' => 0, 'by' => [], 'days' => [], 'last' => $date, 'issues' => [], 'page' => CrawlerCollector::fetchKind($path) === 'page'];
                 $page['requests'] += $count;
@@ -89,23 +95,10 @@ final class CrawlHealth
         }
 
         foreach ($this->crawlers as $label => &$crawler) {
-            $crawler['fetched_daily'] = array_map(function (string $date) use ($days, $label) {
-                if (! isset($this->period->verified()[$date])) {
-                    return null;
-                }
-
-                $fetched = [];
-
-                foreach ($days[$date] ?? [] as $key => $count) {
-                    [$name, $path] = array_pad(explode(CrawlerCollector::SEPARATOR, (string) $key, 2), 2, '');
-
-                    if (self::label($name) === $label && isset($this->sitemap[self::key($path)])) {
-                        $fetched[self::key($path)] = true;
-                    }
-                }
-
-                return count($fetched);
-            }, $dates);
+            $crawler['fetched_daily'] = array_map(
+                fn (string $date) => isset($verified[$date]) ? count($fetched[$label][$date] ?? []) : null,
+                $dates,
+            );
         }
         unset($crawler);
 
@@ -118,13 +111,24 @@ final class CrawlHealth
      */
     public static function label(string $name): ?string
     {
-        return match (true) {
+        if (array_key_exists($name, self::$labels)) {
+            return self::$labels[$name];
+        }
+
+        return self::$labels[$name] = match (true) {
             str_starts_with($name, 'Googlebot') => 'Google',
             strcasecmp($name, 'bingbot') === 0 => 'Bing',
             Labels::isUserFetcher($name) || preg_match(Patterns::AI_TRAINING, $name) === 1 => self::$spellings[strtolower($name)] ??= $name,
             default => null,
         };
     }
+
+    /**
+     * The label of each name already read: the same names come back on every day.
+     *
+     * @var array<string, ?string>
+     */
+    private static array $labels = [];
 
     /**
      * One spelling per crawler, whatever case its user agent writes its name in.
