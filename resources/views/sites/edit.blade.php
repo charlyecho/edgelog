@@ -135,6 +135,8 @@
                 <li class="grid gap-1.5">
                     <p><span class="font-semibold">3.</span> {{ __('Run it as a service. Change --log if the access log is somewhere else. --metrics also sends the server\'s processors, memory and disks once a minute (Site > Server); leave it out not to.') }}</p>
                     <x-code :code="$setup->serviceCommand()" />
+                    <p class="mt-2">{{ __('Or just the command, for a Laravel Forge daemon (user root) instead of steps 3 and 4:') }}</p>
+                    <x-code :code="$setup->daemonCommand()" />
                 </li>
                 <li class="grid gap-1.5">
                     <p><span class="font-semibold">4.</span> {{ __('Start it, then come back here to see the first lines arrive:') }}</p>

@@ -118,6 +118,19 @@ class SiteManagementTest extends TestCase
         $this->assertSame('Marketing', $site->fresh()->name);
     }
 
+    public function test_the_settings_show_the_daemon_command_for_forge(): void
+    {
+        [$admin, $team] = $this->memberOf(TeamRole::Admin);
+        $site = Site::factory()->for($team)->create();
+        $ingestUrl = route('ingest.store', $site);
+
+        $this->actingAs($admin)
+            ->get(route('teams.sites.edit', [$team, $site]))
+            ->assertOk()
+            ->assertSee('Laravel Forge daemon')
+            ->assertSee("runuser -u edgelog-ship -- /usr/local/bin/edgelog-ship --url {$ingestUrl} --token-file /etc/edgelog-ship/token", false);
+    }
+
     public function test_generating_a_new_token_stops_the_previous_one(): void
     {
         [$admin, $team] = $this->memberOf(TeamRole::Admin);

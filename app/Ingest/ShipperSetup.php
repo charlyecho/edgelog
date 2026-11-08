@@ -22,7 +22,8 @@ final readonly class ShipperSetup
     }
 
     /**
-     * Download the shipper and give it a user of its own, in the group that reads the logs.
+     * Download the shipper and give it a user of its own, in the group that
+     * reads the logs, with the folder that keeps its place in them.
      */
     public function installCommands(): string
     {
@@ -32,6 +33,7 @@ final readonly class ShipperSetup
             curl -fsSL {$download} -o edgelog-ship || wget -qO edgelog-ship {$download}
             sudo install -m 0755 edgelog-ship /usr/local/bin/edgelog-ship
             sudo useradd --system --no-create-home --shell /usr/sbin/nologin --groups adm edgelog-ship
+            sudo install -d -m 0700 -o edgelog-ship -g edgelog-ship /var/lib/edgelog-ship
             SH;
     }
 
@@ -83,6 +85,17 @@ final readonly class ShipperSetup
             WantedBy=multi-user.target
             UNIT
             SH;
+    }
+
+    /**
+     * The same shipper on one line, for a daemon that a tool such as Laravel
+     * Forge runs as root: it hands over to the shipper's own user at once.
+     */
+    public function daemonCommand(): string
+    {
+        $log = $this->site->log_format->defaultLogPath();
+
+        return "runuser -u edgelog-ship -- /usr/local/bin/edgelog-ship --url {$this->ingestUrl()} --token-file /etc/edgelog-ship/token --log {$log} --state /var/lib/edgelog-ship/state --metrics";
     }
 
     /**
