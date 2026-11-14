@@ -66,6 +66,42 @@ class LogWindowReaderTest extends TestCase
         }
     }
 
+    public function test_a_rotation_during_the_first_pass_does_not_change_what_it_reads(): void
+    {
+        $base = "{$this->folder}/".IngestLog::BASE;
+        File::put("{$base}.1", $this->line('21/Oct/2026:08:00:00 +0000', '/morning')."\n");
+        touch("{$base}.1", strtotime('2026-10-21 08:00:00 UTC'));
+        File::put($base, $this->line('21/Oct/2026:20:00:00 +0000', '/evening')."\n");
+
+        $reader = new LogWindowReader($this->folder, LogFormat::NginxCombined->parser(), new DayWindow('2026-10-21', 'UTC'));
+        $firstPass = [];
+
+        foreach ($reader->hits() as $hit) {
+            if ($firstPass === []) {
+                (new IngestLog($this->folder))->rotate();
+                File::put($base, $this->line('22/Oct/2026:00:00:30 +0000', '/next-day')."\n");
+            }
+
+            $firstPass[] = $hit->path();
+        }
+
+        $this->assertSame(['/morning', '/evening'], $firstPass);
+        $this->assertSame(['/morning', '/evening'], array_map(fn (LogHit $hit) => $hit->path(), iterator_to_array($reader->hits(), false)));
+    }
+
+    public function test_lines_shipped_after_the_first_pass_are_left_to_the_next_count(): void
+    {
+        $base = "{$this->folder}/".IngestLog::BASE;
+        File::put($base, $this->line('21/Oct/2026:20:00:00 +0000', '/before')."\n");
+
+        $reader = new LogWindowReader($this->folder, LogFormat::NginxCombined->parser(), new DayWindow('2026-10-21', 'UTC'));
+        $this->assertCount(1, iterator_to_array($reader->hits(), false));
+
+        File::append($base, $this->line('21/Oct/2026:23:59:00 +0000', '/late')."\n");
+
+        $this->assertSame(['/before'], array_map(fn (LogHit $hit) => $hit->path(), iterator_to_array($reader->hits(), false)));
+    }
+
     private function line(string $when, string $path): string
     {
         return "203.0.113.7 - - [{$when}] \"GET {$path} HTTP/1.1\" 200 12 \"-\" \"Mozilla/5.0\"";

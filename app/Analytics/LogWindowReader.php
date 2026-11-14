@@ -39,15 +39,37 @@ final class LogWindowReader
      * Where each file's lines stop being older than the window, found by the
      * first pass, and whether any were: the next pass starts there.
      *
-     * @var array<string, array{offset: int, skipped: bool}>
+     * @var array<int, array{offset: int, skipped: bool}>
      */
     private array $resumeAt = [];
+
+    /**
+     * The files every pass reads, opened by the first: a handle still reads
+     * a file the ingest rotated away (access.log renamed to .1 at the first
+     * batch of a new UTC day), and each pass stops where the first ended, so
+     * the passes of a count always see the very same lines.
+     *
+     * @var ?list<array{handle: resource, gzip: bool, end: ?int}>
+     */
+    private ?array $snapshot = null;
+
+    /**
+     * Whether the snapshot's files left out older ones.
+     */
+    private bool $filesReachBack = false;
 
     public function __construct(
         private readonly string $folder,
         private readonly LogLineParser $parser,
         private readonly DayWindow $window,
     ) {}
+
+    public function __destruct()
+    {
+        foreach ($this->snapshot ?? [] as $file) {
+            $file['gzip'] ? gzclose($file['handle']) : fclose($file['handle']);
+        }
+    }
 
     /**
      * Every readable hit of the window, in file order.
@@ -57,13 +79,12 @@ final class LogWindowReader
     public function hits(): Generator
     {
         $this->lines = $this->unparsed = 0;
-        $this->reachesBack = false;
         $inWindow = false;
         $start = $this->window->start->getTimestamp();
-        $files = $this->files();
+        $files = $this->snapshot();
+        $this->reachesBack = $this->filesReachBack;
 
-        foreach ($files as $file) {
-            $key = $file.':'.fileinode($file);
+        foreach (array_keys($files) as $key) {
             $resume = $this->resumeAt[$key] ?? ['offset' => 0, 'skipped' => false];
             $skipping = true;
 
@@ -72,7 +93,7 @@ final class LogWindowReader
                 $inWindow = false;
             }
 
-            foreach ($this->linesOf($file, $resume['offset']) as $offset => $line) {
+            foreach ($this->linesOf($key, $resume['offset']) as $offset => $line) {
                 $timestamp = trim($line) === '' ? null : $this->parser->timestamp($line);
                 $older = $timestamp !== null && $timestamp < $start;
 
@@ -132,8 +153,8 @@ final class LogWindowReader
      */
     public function hitsContaining(string $needle): Generator
     {
-        foreach ($this->files() as $file) {
-            foreach ($this->linesOf($file) as $line) {
+        foreach (array_keys($this->snapshot()) as $key) {
+            foreach ($this->linesOf($key) as $line) {
                 if (! str_contains($line, $needle)) {
                     continue;
                 }
@@ -184,33 +205,62 @@ final class LogWindowReader
     }
 
     /**
-     * The lines of the file from the given byte, keyed by where each starts.
+     * The window's files, opened once: later passes read the same handles.
+     *
+     * @return list<array{handle: resource, gzip: bool, end: ?int}>
+     */
+    private function snapshot(): array
+    {
+        if ($this->snapshot !== null) {
+            return $this->snapshot;
+        }
+
+        $this->reachesBack = false;
+        $this->snapshot = [];
+
+        foreach ($this->files() as $path) {
+            $gzip = str_ends_with($path, '.gz');
+            $handle = @($gzip ? gzopen($path, 'rb') : fopen($path, 'rb'));
+
+            if ($handle !== false) {
+                $this->snapshot[] = ['handle' => $handle, 'gzip' => $gzip, 'end' => null];
+            }
+        }
+
+        $this->filesReachBack = $this->reachesBack;
+
+        return $this->snapshot;
+    }
+
+    /**
+     * The lines of a snapshot file from the given byte, keyed by where each
+     * starts, up to where the first full read of it ended.
      *
      * @return Generator<int, string>
      */
-    private function linesOf(string $path, int $from = 0): Generator
+    private function linesOf(int $key, int $from = 0): Generator
     {
-        $gzip = str_ends_with($path, '.gz');
-        $handle = $gzip ? gzopen($path, 'rb') : fopen($path, 'rb');
+        ['handle' => $handle, 'gzip' => $gzip, 'end' => $end] = $this->snapshot[$key];
+        $offset = $from;
 
-        if ($handle === false) {
-            return;
-        }
-
-        try {
-            $offset = $from;
+        if ($gzip) {
+            gzrewind($handle);
 
             if ($from > 0) {
-                $gzip ? gzseek($handle, $from) : fseek($handle, $from);
+                gzseek($handle, $from);
             }
+        } else {
+            fseek($handle, $from);
+        }
 
-            while (($line = $gzip ? gzgets($handle) : fgets($handle)) !== false) {
-                yield $offset => $line;
+        while (($end === null || $offset < $end) && ($line = $gzip ? gzgets($handle) : fgets($handle)) !== false) {
+            yield $offset => $line;
 
-                $offset += strlen($line);
-            }
-        } finally {
-            $gzip ? gzclose($handle) : fclose($handle);
+            $offset += strlen($line);
+        }
+
+        if ($end === null) {
+            $this->snapshot[$key]['end'] = $offset;
         }
     }
 }
