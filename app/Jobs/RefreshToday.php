@@ -13,8 +13,10 @@ use Illuminate\Support\Facades\Cache;
 /**
  * Count today so far, once, for every live page: Overview's Real time and
  * Today, and Site's Requests. The pages only read what this kept in the
- * cache; they never count. Runs on the "live" queue, so a long count never
- * holds the daily counts and audits back.
+ * cache; they never count. Queued only by a page that finds its count
+ * missing or old: nothing is counted ahead for no one, as a count reads the
+ * whole day's log. Runs on the "live" queue, so a long count never holds
+ * the daily counts and audits back.
  */
 class RefreshToday implements ShouldBeUnique, ShouldQueue
 {
@@ -31,9 +33,16 @@ class RefreshToday implements ShouldBeUnique, ShouldQueue
 
     /**
      * How old a count may be before a page asks for a new one, in seconds:
-     * a little more than the two minutes between scheduled refreshes.
+     * a little less than the RELOAD_SECONDS between a live page's reloads,
+     * so each reload asks for the count the next one shows.
      */
-    public const int FRESH_SECONDS = 180;
+    public const int FRESH_SECONDS = 240;
+
+    /**
+     * How often a live page reloads itself, in seconds: its figures are at
+     * most that old, as many analytics do.
+     */
+    public const int RELOAD_SECONDS = 300;
 
     /**
      * How long a count stands when no line arrived since, in seconds: only
@@ -41,25 +50,9 @@ class RefreshToday implements ShouldBeUnique, ShouldQueue
      */
     public const int IDLE_SECONDS = 600;
 
-    /**
-     * The least time between two refreshes queued by arriving log lines, in seconds.
-     */
-    public const int AT_MOST_EVERY = 60;
-
     public function __construct(public Site $site)
     {
         $this->onQueue(self::QUEUE);
-    }
-
-    /**
-     * Queue a refresh because new lines arrived, at most once a minute per
-     * site, however many batches the shippers send.
-     */
-    public static function soon(Site $site): void
-    {
-        if (Cache::add("live-refresh-queued:{$site->id}", true, self::AT_MOST_EVERY)) {
-            self::dispatch($site);
-        }
     }
 
     public function uniqueId(): string

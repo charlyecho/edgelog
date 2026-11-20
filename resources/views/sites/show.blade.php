@@ -65,7 +65,7 @@
 
     @if ($live)
         @php($todayDay = $period->days[$period->first->toDateString()] ?? null)
-        <div class="mb-3 flex flex-wrap items-center justify-between gap-3 text-[13px] text-ink-2" data-live-refresh="{{ $countedAt === null ? 15 : 120 }}">
+        <div class="mb-3 flex flex-wrap items-center justify-between gap-3 text-[13px] text-ink-2" data-live-refresh="{{ $countedAt === null ? 15 : \App\Jobs\RefreshToday::RELOAD_SECONDS }}">
             <p>
                 <span class="font-semibold text-ink">{{ __('Today so far') }}</span> ·
                 @if ($countedAt === null)
@@ -78,9 +78,9 @@
                         'counted' => \Carbon\CarbonImmutable::createFromTimestamp($countedAt, $site->timezone)->format('H:i'),
                     ]) }}
                 @endif
-                <span data-live-state>{{ __('Refreshed every 2 minutes.') }}</span>
+                <span data-live-state>{{ __('Refreshed every 5 minutes.') }}</span>
             </p>
-            <button type="button" class="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-rule bg-surface px-3 font-semibold text-ink hover:border-ink-3" data-live-pause data-pause="{{ __('Pause') }}" data-resume="{{ __('Resume') }}" data-paused="{{ __('Paused.') }}" data-running="{{ __('Refreshed every 2 minutes.') }}">
+            <button type="button" class="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-rule bg-surface px-3 font-semibold text-ink hover:border-ink-3" data-live-pause data-pause="{{ __('Pause') }}" data-resume="{{ __('Resume') }}" data-paused="{{ __('Paused.') }}" data-running="{{ __('Refreshed every 5 minutes.') }}">
                 {{ __('Pause') }}
             </button>
         </div>

@@ -10,7 +10,6 @@ Artisan::command('inspire', function () {
 
 Schedule::command('edgelog:run-daily')->hourly()->withoutOverlapping();
 Schedule::command('edgelog:count-history')->everyFiveMinutes()->withoutOverlapping();
-Schedule::command('edgelog:live')->everyTwoMinutes()->withoutOverlapping();
 Schedule::command('edgelog:errors')->everyMinute()->withoutOverlapping();
 Schedule::command('edgelog:errors --prune')->dailyAt('03:40');
 Schedule::command('edgelog:roll-metrics')->hourlyAt(2)->withoutOverlapping();

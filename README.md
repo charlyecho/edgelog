@@ -43,7 +43,7 @@ follows its features, its behaviour and its look.
 - **Overview** of a site. *Summary*: visitors, pages read, visitors from AI, AI assistants,
   search engines and bots, each with its change and its days, a daily chart, the top countries,
   pages, sources and AI assistants, who else came, and each day in numbers, for yesterday, 7, 30,
-  90 days or all time. *Real time*: today so far, refreshed every two minutes.
+  90 days or all time. *Real time*: today so far, refreshed every five minutes.
 - **Translatable interface**: every text goes through `__()` with English keys. English only
   for now.
 
@@ -195,14 +195,14 @@ marked as partial.
 **Real time.** A `RefreshToday` job, on the `live` queue, reads today's log so far once, with the
 daily count's own passes, and keeps three things in the cache (never in the history): the Real
 time snapshot, today's figures for Overview's **Today**, and the last hours' requests for Site's
-**Requests**. One is queued as soon as a batch brings new lines (at most once a minute per site),
-and every two minutes by `edgelog:live` for each site that sent lines in the last two hours; with
-no new line it stands up to 10 minutes, so "active now" still goes down when nothing arrives. The
-pages never count: they show the last count and its time, or "being counted" while the first of
-the day is made. The site's **Real time** tab shows it: visitors active now and in
+**Requests**. One is queued only by one of these pages, when its count is missing or more than
+four minutes old: nothing is counted for no one, as a count reads the whole day's log. With no new
+line it stands up to 10 minutes, so "active now" still goes down when nothing arrives. The pages
+never count: they show the last count and its time, or "being counted" while the first of the day
+is made. The site's **Real time** tab shows it: visitors active now and in
 the last 30 minutes, visitors today, minute-by-minute charts, pages being read, the newest visits,
-and the AI assistants and crawlers fetching right now. The page reloads itself every two minutes
-unless paused.
+and the AI assistants and crawlers fetching right now. The page reloads itself every five minutes
+unless paused, so its figures are at most that old.
 
 To count days again (after a change of rules, or a withheld day once its cause is found):
 

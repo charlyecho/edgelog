@@ -10,7 +10,6 @@ use App\Ingest\IngestLogFull;
 use App\Ingest\IngestRefusal;
 use App\Ingest\TeamDailyQuota;
 use App\Ingest\UtcDay;
-use App\Jobs\RefreshToday;
 use App\Models\IngestStatus;
 use App\Models\Site;
 use Illuminate\Http\Request;
@@ -87,10 +86,6 @@ class IngestBatch
         }
 
         IngestStatus::recordBatch($site, $batch, $lines->accepted, $lines->rejected);
-
-        if ($lines->accepted > 0) {
-            RefreshToday::soon($site);
-        }
 
         return new IngestOutcome($lines->accepted, $lines->rejected);
     }

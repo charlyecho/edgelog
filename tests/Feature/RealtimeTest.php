@@ -9,7 +9,6 @@ use App\Jobs\RefreshToday;
 use App\Models\Site;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Queue;
@@ -131,19 +130,6 @@ class RealtimeTest extends TestCase
         $this->assertSame(10, $kept['requests']['total']);
     }
 
-    public function test_only_sites_that_sent_lines_lately_are_refreshed(): void
-    {
-        Bus::fake();
-        $quiet = Site::factory()->create();
-        $quiet->ingestStatus()->create(['last_contact_at' => now()->subDay()]);
-        $this->site->ingestStatus()->create(['last_contact_at' => now()->subMinutes(3)]);
-
-        $this->artisan('edgelog:live')->assertSuccessful();
-
-        Bus::assertDispatched(RefreshToday::class, fn (RefreshToday $job) => $job->site->is($this->site));
-        Bus::assertNotDispatched(RefreshToday::class, fn (RefreshToday $job) => $job->site->is($quiet));
-    }
-
     public function test_others_cannot_see_the_real_time_tab(): void
     {
         $this->actingAs(User::factory()->create())
@@ -151,13 +137,13 @@ class RealtimeTest extends TestCase
             ->assertForbidden();
     }
 
-    public function test_a_count_older_than_three_minutes_is_counted_again_on_the_live_queue(): void
+    public function test_a_count_older_than_four_minutes_is_counted_again_on_the_live_queue(): void
     {
         $this->writeToday();
         $this->site->ingestStatus()->create(['last_batch_at' => now()]);
         $first = RefreshToday::latest($this->site);
 
-        $this->travel(2)->minutes();
+        $this->travel(3)->minutes();
         $this->assertSame($first['counted_at'], RefreshToday::latest($this->site)['counted_at']);
 
         Queue::fake();
