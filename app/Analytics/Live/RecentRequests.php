@@ -69,15 +69,18 @@ final class RecentRequests
     }
 
     /**
-     * Read the window on its own, from the start of the site's day it begins
-     * in: when it reaches back before today, which today's pass does not read.
+     * Read the window on its own, from a visit's gap before its first hour:
+     * when it reaches back before today, which today's pass does not read.
      *
      * @return array{from: int, until: int, total: int, by_group: array<string, int>, rows: list<array<string, mixed>>}
      */
     public function collect(Site $site): array
     {
         $now = now()->toImmutable();
-        $window = new DayWindow(self::from()->setTimezone($site->timezone)->toDateString(), $site->timezone, $now->addSecond());
+        // Only the window's hours, and a visit's gap before them for the
+        // evidence of the visits under way then: never the whole day before.
+        $from = self::from()->subMinutes((int) config('analytics.visit_gap_minutes'));
+        $window = new DayWindow($from->setTimezone($site->timezone)->toDateString(), $site->timezone, $now->addSecond(), $from);
         $hosts = SiteHosts::of($site);
         $reader = new LogWindowReader(IngestLog::for($site)->folder(), $site->log_format->parser(), $window);
         $notPages = NotPages::of($site);

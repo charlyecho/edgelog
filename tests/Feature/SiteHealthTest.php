@@ -2,12 +2,14 @@
 
 namespace Tests\Feature;
 
+use App\Analytics\Live\RecentRequests;
 use App\Enums\CountKind;
 use App\Enums\DayStatus;
 use App\Ingest\IngestLog;
 use App\Models\Site;
 use App\Models\SiteDay;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
 use Tests\TestCase;
@@ -194,5 +196,19 @@ class SiteHealthTest extends TestCase
         $requests(['show' => 'people'])->assertSee('/old-page')->assertDontSee('ours: heartbeat');
         $requests(['q' => 'old-page'])->assertSee('/old-page')->assertDontSee('search: Googlebot');
         $requests(['status' => '5xx'])->assertSee('/pricing/')->assertDontSee('/old-page');
+    }
+
+    public function test_the_last_hours_across_midnight_hold_only_their_own_requests(): void
+    {
+        $folder = IngestLog::for($this->site)->folder();
+        File::ensureDirectoryExists($folder);
+        file_put_contents("{$folder}/access.log", implode("\n", $this->day())."\n");
+        $this->travelTo('2026-10-22 01:00:00');
+
+        $requests = app(RecentRequests::class)->collect($this->site);
+
+        // From 19:00 the day before: the heartbeat's 60 requests up to midnight and its first after, none of the morning.
+        $this->assertSame(61, $requests['total']);
+        $this->assertSame(CarbonImmutable::parse('2026-10-21 19:00:00')->getTimestamp(), $requests['from']);
     }
 }

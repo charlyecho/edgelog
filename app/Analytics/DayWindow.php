@@ -7,7 +7,9 @@ use Carbon\CarbonImmutable;
 
 /**
  * One calendar day of a site, in the site's own time zone, as a window of
- * UTC instants: from its first second, up to the next day's first.
+ * UTC instants: from its first second, up to the next day's first. A window
+ * may start later than the day (the last hours only) or stop earlier (a day
+ * not over yet).
  */
 final readonly class DayWindow
 {
@@ -17,10 +19,11 @@ final readonly class DayWindow
 
     /**
      * @param  ?CarbonImmutable  $until  where the window stops when the day is not over yet
+     * @param  ?CarbonImmutable  $from  where the window starts when it is only the end of the day
      */
-    public function __construct(public string $day, public string $timezone, ?CarbonImmutable $until = null)
+    public function __construct(public string $day, public string $timezone, ?CarbonImmutable $until = null, ?CarbonImmutable $from = null)
     {
-        $this->start = CarbonImmutable::parse($day, $timezone)->startOfDay()->utc();
+        $this->start = $from?->utc() ?? CarbonImmutable::parse($day, $timezone)->startOfDay()->utc();
         $this->end = $until?->utc() ?? CarbonImmutable::parse($day, $timezone)->addDay()->startOfDay()->utc();
     }
 
