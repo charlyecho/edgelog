@@ -40,6 +40,8 @@
             @endforelse
         </x-card>
 
+        @include('servers.software')
+
         @if ($range->latest() === null)
             <x-card :title="__('No figures from the server yet')">
                 <p class="text-ink-2">{{ __('The first figures show here a minute after a shipper starts with --metrics.') }}</p>

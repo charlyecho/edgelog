@@ -2,9 +2,11 @@
 
 namespace App\Actions\Ingest;
 
+use App\Analytics\Stack\ServerSoftware;
 use App\Ingest\IngestGate;
 use App\Ingest\IngestRefusal;
 use App\Ingest\ServerSample;
+use App\Jobs\CheckServerSoftware;
 use App\Models\Server;
 use App\Models\ServerMetricMinute;
 use App\Models\Site;
@@ -21,6 +23,9 @@ use Illuminate\Http\Request;
  * The sample is kept for the minute the server got it, by this server's
  * clock: a second sample in the same minute, from this site's shipper or
  * from another site's on the same machine, takes the place of the first.
+ * What runs on the machine, when the sample says it, is kept with what was
+ * judged of the same builds; another build is judged at once (end of life,
+ * known flaws) on the queue.
  */
 class IngestServerSample
 {
@@ -37,7 +42,19 @@ class IngestServerSample
         $server = $this->server($site, $sample);
         $minute = now()->startOfMinute();
 
-        $server->forceFill(['last_sample_at' => $minute, 'hostname' => $sample->hostname ?? $server->hostname])->save();
+        $server->forceFill(['last_sample_at' => $minute, 'hostname' => $sample->hostname ?? $server->hostname]);
+
+        $softwareChanged = $sample->software !== null && ServerSoftware::changed($server->software, $sample->software);
+
+        if ($sample->software !== null) {
+            $server->forceFill(['software' => ServerSoftware::withJudgements($server->software, $sample->software), 'software_read_at' => now()]);
+        }
+
+        $server->save();
+
+        if ($softwareChanged) {
+            CheckServerSoftware::dispatch($server);
+        }
 
         return $server->metricMinutes()->updateOrCreate(['minute' => $minute], $sample->toRow());
     }

@@ -81,6 +81,24 @@
                                 </div>
                             @endforeach
                         </dl>
+                        @if (($host['certificate'] ?? null) !== null)
+                            @php
+                                $certificateEnds = \Carbon\CarbonImmutable::parse($host['certificate']['expires_at']);
+                                $certificateTone = match (true) {
+                                    $certificateEnds->isPast() || ! $host['certificate']['trusted'] || $certificateEnds->lessThan(now()->addDays(\App\Analytics\SiteAlerts::CERTIFICATE_BAD_DAYS)) => 'text-bad',
+                                    $certificateEnds->lessThan(now()->addDays(\App\Analytics\SiteAlerts::CERTIFICATE_WARN_DAYS)) => 'text-warn',
+                                    default => 'text-ink-2',
+                                };
+                            @endphp
+                            <p class="mt-3 text-[13px]">
+                                <span class="font-semibold">{{ __('TLS certificate') }}</span>
+                                <span class="block {{ $certificateTone }}">
+                                    {{ $certificateEnds->isPast() ? __('expired on :date', ['date' => $certificateEnds->toDateString()]) : __('ends on :date (:when)', ['date' => $certificateEnds->toDateString(), 'when' => $certificateEnds->diffForHumans()]) }}
+                                    @if ($host['certificate']['issuer']) · {{ $host['certificate']['issuer'] }} @endif
+                                    @unless ($host['certificate']['trusted']) · {{ __('not trusted by browsers') }} @endunless
+                                </span>
+                            </p>
+                        @endif
                         @if ($host['login'] === 'open')
                             <p class="mt-3 text-[13px] font-semibold text-bad">{{ __('Login page open to the internet: /wp-login.php answers anyone.') }}</p>
                         @elseif ($host['login'] === 'closed')

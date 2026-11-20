@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Analytics\SiteAlerts;
+use App\Analytics\Stack\CertificateReader;
 use App\Jobs\CheckStack;
 use App\Models\Site;
 use App\Models\User;
@@ -15,12 +17,25 @@ class StackTest extends TestCase
 
     private Site $site;
 
+    /**
+     * The certificate each host shows, by host.
+     *
+     * @var array<string, ?array<string, mixed>>
+     */
+    private array $certificates = [];
+
     protected function setUp(): void
     {
         parent::setUp();
 
         $this->travelTo('2026-10-23 08:00:00');
         $this->site = Site::factory()->create(['url' => 'https://example.com']);
+
+        $this->certificates = [
+            'example.com' => ['expires_at' => '2026-12-20T12:00:00Z', 'issuer' => "Let's Encrypt", 'names' => ['example.com'], 'trusted' => true],
+            'example.org' => null,
+        ];
+        $this->mock(CertificateReader::class, fn ($mock) => $mock->shouldReceive('read')->andReturnUsing(fn (string $host) => $this->certificates[$host] ?? null));
 
         Http::fake([
             'example.com/' => Http::response('', 302, ['Location' => '/home', 'Server' => 'nginx/1.24.0', 'X-Powered-By' => 'PHP/8.1.2', 'Set-Cookie' => 'PHPSESSID=abc; path=/']),
@@ -66,5 +81,54 @@ class StackTest extends TestCase
             ->assertSee('Login page open to the internet');
 
         $this->actingAs($viewer)->post(route('teams.sites.security.stack.refresh', [$this->site->team, $this->site]))->assertForbidden();
+    }
+
+    public function test_each_hosts_certificate_is_read_and_one_ending_soon_is_an_alert(): void
+    {
+        CheckStack::dispatchSync($this->site);
+
+        [$site, $origin] = $this->site->stack()->first()->hosts;
+        $this->assertSame(['2026-12-20T12:00:00Z', true], [$site['certificate']['expires_at'], $site['certificate']['trusted']]);
+        $this->assertNull($origin['certificate']);
+        $this->assertSame([], $this->certificateAlerts(), 'Two months ahead is no alert.');
+
+        $this->travelTo('2026-12-05 08:00:00');
+        $this->assertSame([['warn', 'Certificate ends in 15 days']], $this->certificateAlerts());
+
+        $this->travelTo('2026-12-18 08:00:00');
+        $this->assertSame([['bad', 'Certificate ends in 2 days']], $this->certificateAlerts());
+
+        $this->travelTo('2026-12-21 08:00:00');
+        $this->assertSame([['bad', 'Certificate expired']], $this->certificateAlerts());
+    }
+
+    public function test_a_certificate_browsers_do_not_trust_is_an_alert_and_shows_on_the_page(): void
+    {
+        $this->certificates['example.com']['trusted'] = false;
+        CheckStack::dispatchSync($this->site);
+
+        $this->assertSame([['bad', 'Certificate not trusted']], $this->certificateAlerts());
+
+        $viewer = User::factory()->create();
+        $this->site->team->members()->attach($viewer, ['role' => 'viewer']);
+        $this->actingAs($viewer)->get(route('teams.sites.security.stack', [$this->site->team, $this->site]))
+            ->assertOk()
+            ->assertSee('TLS certificate')
+            ->assertSee('ends on 2026-12-20')
+            ->assertSee('not trusted by browsers');
+    }
+
+    /**
+     * The site's alerts about its certificate, as [tone, label].
+     *
+     * @return list<array{0: string, 1: string}>
+     */
+    private function certificateAlerts(): array
+    {
+        return collect(SiteAlerts::for(collect([$this->site->fresh()]))[$this->site->id])
+            ->filter(fn (array $alert) => str_starts_with($alert['label'], 'Certificate'))
+            ->map(fn (array $alert) => [$alert['tone'], $alert['label']])
+            ->values()
+            ->all();
     }
 }

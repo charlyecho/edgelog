@@ -70,8 +70,18 @@
 # skipped, and the log lines go on all the same. Each sample names the
 # machine by a hash of its /etc/machine-id (never the id itself) and its host
 # name, so the sites whose shippers run on it share one server, its figures
-# kept once. --print-metrics prints one sample, read over a second, and
-# exits; it needs no URL or token.
+# kept once. Once an hour (and with the first sample), a sample also says
+# what runs on the machine: its system (/etc/os-release), and the version of
+# each PHP (with FPM's display_errors, expose_php and opcache.enable),
+# nginx, Apache, MySQL or MariaDB, PostgreSQL, Redis, Memcached, Node.js,
+# OpenSSL and the running kernel found, each with the Debian package it
+# comes from when dpkg knows it; Edgelog sets them against their end of life
+# and the known flaws (CVE). With them goes the machine's state: whether a
+# reboot is waited for, the updates waiting and whether security ones are
+# installed by themselves, the TCP addresses listened on, sshd's
+# PermitRootLogin and PasswordAuthentication, and the failed services. --print-metrics prints one sample,
+# read over a second, with what runs on the machine, and exits; it needs no
+# URL or token.
 #
 # The token is never put on a command line (other users could read it in
 # the process list): curl and wget read it from a file only this user reads.
@@ -79,7 +89,7 @@
 
 set -u
 
-VERSION=1.3.0
+VERSION=1.4.0
 MAX_BATCH_BYTES=4194304
 MAX_LINE=65536
 MAX_RETRY_AFTER=600
@@ -100,6 +110,9 @@ METRICS=0
 MACHINE=
 PRINT_METRICS=0
 METRICS_EVERY=60
+SOFTWARE_EVERY=3600
+SOFTWARE_AT=0
+SOFTWARE_ADDED=0
 ERRORS=
 PATTERN=
 
@@ -211,6 +224,247 @@ read_metrics() {
     mv -f "$WORK/metrics.keep" "$WORK/metrics.last"
 }
 
+# ---------------------------------------------------------------- software
+
+# Run a command for at most <seconds> when timeout is there, its errors
+# with its output.
+limited() {
+    seconds=$1
+    shift
+    if command -v timeout >/dev/null 2>&1; then
+        timeout "$seconds" "$@" 2>&1
+    else
+        "$@" 2>&1
+    fi
+}
+
+# Run a program that says its version, for at most 5 seconds.
+ask() {
+    limited 5 "$@"
+}
+
+# Where a program is; empty when it is not there. Services often have it in
+# an sbin folder that is not on the PATH. Links are kept: redis-server is a
+# link to a program that answers otherwise under another name.
+program() {
+    found=$(command -v "$1" 2>/dev/null) || found=
+    if [ -z "$found" ]; then
+        for dir in /usr/sbin /usr/local/sbin /sbin; do
+            [ -x "$dir/$1" ] && found=$dir/$1 && break
+        done
+    fi
+    printf '%s' "$found"
+}
+
+# The first word of what a program says that starts with a number, after
+# <prefix> when one is given, kept to the characters of a version.
+version_word() {
+    LC_ALL=C awk -v prefix="$1" '{
+        for (i = 1; i <= NF; i++) {
+            word = $i
+            if (prefix != "" && index(word, prefix) != 1) continue
+            word = substr(word, length(prefix) + 1)
+            if (word ~ /^[0-9]+\.[0-9]+/) { gsub(/[^A-Za-z0-9.+~:_-]/, "", word); print word; exit }
+        }
+    }'
+}
+
+# The Debian package a file comes from: its source package and version,
+# tab-separated. Nothing without dpkg, or when no package owns the file.
+package_of() {
+    command -v dpkg-query >/dev/null 2>&1 || return 0
+    file=$(readlink -f "$1" 2>/dev/null) || file=$1
+    for owned in "$file" "${file#/usr}"; do
+        owner=$(dpkg-query -S "$owned" 2>/dev/null | grep -v '^diversion' | head -n 1 | cut -d: -f1)
+        [ -z "$owner" ] || break
+    done
+    [ -z "$owner" ] || dpkg-query -W -f='${source:Package}\t${Version}' "$owner" 2>/dev/null | head -n 1
+}
+
+# One program found: product, version, its package and the package's
+# version, then its settings (name=value,...), tab-separated. Nothing when
+# it said no version.
+software_line() {
+    [ -n "$3" ] || return 0
+    package=$(package_of "$2")
+    [ -n "$package" ] || package=$(printf '\t')
+    printf '%s\t%s\t%s\t%s\n' "$1" "$3" "$package" "${4:-}"
+}
+
+# The PHP settings that matter on a public server, as FPM reads them.
+php_settings() {
+    ask "$1" -i | LC_ALL=C awk -F ' => ' '
+        $1 == "display_errors" || $1 == "expose_php" || $1 == "opcache.enable" { printf "%s%s=%s", (count++ ? "," : ""), $1, $2 }
+    '
+}
+
+# sshd's settings as it reads them: its main file, the files it includes
+# where it includes them, up to the first Match block; the first value of
+# each wins. "partial=1" when an included file cannot be read.
+ssh_settings() {
+    [ -r /etc/ssh/sshd_config ] || return 0
+    partial=0
+    while IFS= read -r line || [ -n "$line" ]; do
+        case $line in
+            [Ii][Nn][Cc][Ll][Uu][Dd][Ee][[:space:]]*)
+                for included in $(printf '%s\n' "$line" | cut -d' ' -f2-); do
+                    case $included in /*) ;; *) included=/etc/ssh/$included ;; esac
+                    for file in $included; do
+                        [ -e "$file" ] || continue
+                        if [ -r "$file" ]; then cat "$file"; echo; else partial=1; fi
+                    done
+                done
+                ;;
+            *) printf '%s\n' "$line" ;;
+        esac
+    done < /etc/ssh/sshd_config > "$WORK/sshd"
+    LC_ALL=C awk -v partial="$partial" '
+        tolower($1) == "match" { exit }
+        { key = tolower($1) }
+        (key == "permitrootlogin" || key == "passwordauthentication") && !(key in seen) { seen[key] = tolower($2) }
+        END {
+            printf "permit_root_login=%s,password_authentication=%s,partial=%s", seen["permitrootlogin"], seen["passwordauthentication"], partial
+        }
+    ' "$WORK/sshd"
+}
+
+# The machine's state into $WORK/system.env, one name=value a line: a
+# reboot waited for, the updates waiting (from apt's own lists, as apt's
+# daily timer keeps them), automatic security updates, the TCP addresses
+# listened on (loopback left out), sshd's settings, the failed services.
+read_system() {
+    {
+        if [ -e /var/run/reboot-required ]; then echo reboot=true; else echo reboot=false; fi
+        [ ! -r /var/run/reboot-required.pkgs ] || echo "reboot_packages=$(sort -u /var/run/reboot-required.pkgs | head -n 20 | paste -sd, -)"
+
+        if command -v apt-get >/dev/null 2>&1 && LC_ALL=C limited 120 apt-get -s -o Debug::NoLocking=1 dist-upgrade > "$WORK/apt"; then
+            echo "updates=$(grep -c '^Inst ' "$WORK/apt")"
+            echo "security_updates=$(grep '^Inst ' "$WORK/apt" | grep -ci 'security')"
+        fi
+        if command -v apt-config >/dev/null 2>&1; then
+            if command -v unattended-upgrade >/dev/null 2>&1 && apt-config dump 2>/dev/null | grep -q 'APT::Periodic::Unattended-Upgrade "1"'; then
+                echo unattended=true
+            else
+                echo unattended=false
+            fi
+        fi
+
+        if command -v ss >/dev/null 2>&1; then
+            echo "listening=$(ss -tln 2>/dev/null | awk 'NR > 1 { print $4 }' | grep -v -e '^127\.' -e '^\[::1\]' -e '^\[::ffff:127\.' -e '%lo:' | sort -u | head -n 64 | paste -sd, -)"
+        fi
+
+        settings=$(ssh_settings)
+        [ -z "$settings" ] || echo "ssh=$settings"
+
+        if command -v systemctl >/dev/null 2>&1; then
+            echo "failed_units=$(systemctl list-units --state=failed --plain --no-legend --no-pager 2>/dev/null | awk '{ print $1 }' | head -n 20 | paste -sd, -)"
+        fi
+    } > "$WORK/system.env"
+}
+
+# What runs on the machine into $WORK/software.json: the system and its
+# state, then each PHP (every version installed, command line and FPM, with
+# FPM's settings), nginx, Apache, the MySQL or MariaDB server, PostgreSQL,
+# Redis, Memcached, Node.js, OpenSSL and the running kernel.
+read_software() {
+    os=$(. /etc/os-release 2>/dev/null; printf '%s' "${ID:-}" | tr -cd 'a-z0-9._-')
+    os_version=$(. /etc/os-release 2>/dev/null; printf '%s' "${VERSION_ID:-}" | tr -cd 'A-Za-z0-9._-')
+    read_system
+    {
+        seen=
+        for path in $(program php) /usr/bin/php[0-9]*.[0-9]* /usr/sbin/php-fpm[0-9]*.[0-9]*; do
+            [ -x "$path" ] || continue
+            path=$(readlink -f "$path")
+            case " $seen " in *" $path "*) continue ;; esac
+            seen="$seen $path"
+            settings=
+            case ${path##*/} in php-fpm*) settings=$(php_settings "$path") ;; esac
+            software_line php "$path" "$(ask "$path" -n -v | grep -m 1 '^PHP ' | version_word '')" "$settings"
+        done
+
+        path=$(program nginx)
+        [ -z "$path" ] || software_line nginx "$path" "$(ask "$path" -v | version_word nginx/)"
+
+        path=$(program apache2)
+        [ -n "$path" ] || path=$(program httpd)
+        [ -z "$path" ] || software_line apache "$path" "$(ask "$path" -v | version_word Apache/)"
+
+        for name in mariadbd mysqld; do
+            path=$(program "$name")
+            [ -n "$path" ] || continue
+            said=$(ask "$path" --version)
+            case $said in *MariaDB*) product=mariadb ;; *) product=mysql ;; esac
+            software_line "$product" "$path" "$(printf '%s\n' "$said" | version_word '')"
+            break
+        done
+
+        for path in /usr/lib/postgresql/*/bin/postgres /usr/pgsql-*/bin/postgres; do
+            [ -x "$path" ] && software_line postgresql "$path" "$(ask "$path" --version | version_word '')"
+        done
+
+        path=$(program redis-server)
+        [ -z "$path" ] || software_line redis "$path" "$(ask "$path" --version | version_word v=)"
+
+        path=$(program memcached)
+        [ -z "$path" ] || software_line memcached "$path" "$(ask "$path" -V | version_word '')"
+
+        path=$(program node)
+        [ -n "$path" ] || path=$(program nodejs)
+        [ -z "$path" ] || software_line nodejs "$path" "$(ask "$path" -v | version_word v)"
+
+        path=$(program openssl)
+        [ -z "$path" ] || software_line openssl "$path" "$(ask "$path" version | version_word '')"
+
+        kernel=$(uname -r 2>/dev/null)
+        [ -z "$kernel" ] || software_line linux "/lib/modules/$kernel/modules.builtin" "$(printf '%s\n' "$kernel" | version_word '')"
+    } | LC_ALL=C sort -u | LC_ALL=C awk -F '\t' -v os="$os" -v os_version="$os_version" -v machine_state="$WORK/system.env" '
+        function text(value) { gsub(/\\/, "\\\\", value); gsub(/"/, "\\\"", value); return "\"" value "\"" }
+        function maybe(value) { return value == "" ? "null" : text(value) }
+        function list(csv,    parts, n, i, out) {
+            n = split(csv, parts, ",")
+            for (i = 1; i <= n; i++) if (parts[i] != "") out = out (out == "" ? "" : ",") text(parts[i])
+            return "[" out "]"
+        }
+        function pairs(csv,    parts, n, i, at, out) {
+            n = split(csv, parts, ",")
+            for (i = 1; i <= n; i++) {
+                at = index(parts[i], "=")
+                if (at > 1) out = out (out == "" ? "" : ",") text(substr(parts[i], 1, at - 1)) ":" maybe(substr(parts[i], at + 1))
+            }
+            return "{" out "}"
+        }
+        NF >= 2 && $2 != "" {
+            programs = programs (count++ ? "," : "") "{\"product\":" text($1) ",\"version\":" text($2) ",\"package\":" maybe($3) ",\"package_version\":" maybe($4) ",\"settings\":" ($5 == "" ? "null" : pairs($5)) "}"
+        }
+        END {
+            while ((getline line < machine_state) > 0) {
+                at = index(line, "=")
+                if (at > 1) state[substr(line, 1, at - 1)] = substr(line, at + 1)
+            }
+            printf "{\"os\":%s,\"os_version\":%s,\"programs\":[%s],", maybe(os), maybe(os_version), programs
+            printf "\"system\":{\"reboot_required\":%s,", ("reboot" in state) ? state["reboot"] : "null"
+            printf "\"reboot_packages\":%s,", ("reboot_packages" in state) ? list(state["reboot_packages"]) : "[]"
+            printf "\"updates\":%s,", ("updates" in state) ? state["updates"] + 0 : "null"
+            printf "\"security_updates\":%s,", ("security_updates" in state) ? state["security_updates"] + 0 : "null"
+            printf "\"unattended_upgrades\":%s,", ("unattended" in state) ? state["unattended"] : "null"
+            printf "\"listening\":%s,", ("listening" in state) ? list(state["listening"]) : "null"
+            printf "\"ssh\":%s,", ("ssh" in state) ? pairs(state["ssh"]) : "null"
+            printf "\"failed_units\":%s}}", ("failed_units" in state) ? list(state["failed_units"]) : "null"
+        }
+    ' > "$WORK/software.json"
+}
+
+# Add what runs on the machine to the sample read last, once an hour after
+# the last one the server took (with the first sample too), or now.
+add_software() {
+    SOFTWARE_ADDED=0
+    [ "${1:-}" = now ] || [ "$(($(date +%s) - SOFTWARE_AT))" -ge "$SOFTWARE_EVERY" ] || return 0
+    read_software || return 0
+    { sed '$ s/}$//' "$WORK/metrics.json"; printf ',"software":'; cat "$WORK/software.json"; printf '}\n'; } > "$WORK/metrics.with" \
+        && mv -f "$WORK/metrics.with" "$WORK/metrics.json" \
+        && SOFTWARE_ADDED=1
+}
+
 while [ $# -gt 0 ]; do
     case $1 in
         --url) need_value "$1" $#; URL=$2; shift 2 ;;
@@ -241,6 +495,7 @@ if [ "$PRINT_METRICS" -eq 1 ]; then
     WORK=$(mktemp -d) || die "no temporary folder"
     trap 'rm -rf "$WORK"' EXIT
     read_metrics && sleep 1 && read_metrics || die "the server's figures cannot be read"
+    add_software now
     cat "$WORK/metrics.json"
     exit 0
 fi
@@ -585,11 +840,15 @@ send_metrics() {
     [ "${1:-}" = now ] || [ "$(($(date +%s) - METRICS_AT))" -ge "$METRICS_EVERY" ] || return 0
     METRICS_AT=$(date +%s)
     read_metrics || return 0
+    add_software
     gzip -c < "$WORK/metrics.json" > "$WORK/metrics.gz"
     http_post 'X-Edgelog-Metrics: 1' "${URL%/}/metrics" "$WORK/metrics.gz" 'application/json'
 
     case $STATUS in
-        2[0-9][0-9]) METRICS_FAILING=0 ;;
+        2[0-9][0-9])
+            METRICS_FAILING=0
+            [ "$SOFTWARE_ADDED" -eq 0 ] || SOFTWARE_AT=$(date +%s)
+            ;;
         *)
             if [ "$METRICS_FAILING" -eq 0 ]; then
                 reason=$(answer_field error)

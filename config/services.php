@@ -18,6 +18,12 @@ return [
         'key' => env('POSTMARK_API_KEY'),
     ],
 
+    // The NVD's key raises its rate (50 requests in 30 seconds instead of 5)
+    // for the known flaws of the servers' software; none is needed.
+    'nvd' => [
+        'key' => env('NVD_API_KEY'),
+    ],
+
     'resend' => [
         'key' => env('RESEND_API_KEY'),
     ],

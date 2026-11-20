@@ -44,6 +44,9 @@ class Server extends Model
     {
         return [
             'last_sample_at' => 'immutable_datetime',
+            'software' => 'array',
+            'software_read_at' => 'immutable_datetime',
+            'software_checked_at' => 'immutable_datetime',
         ];
     }
 

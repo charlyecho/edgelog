@@ -5,13 +5,15 @@ namespace App\Analytics;
 use App\Enums\DayStatus;
 use App\Models\IngestStatus;
 use App\Models\Site;
+use App\Models\SiteStack;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
  * What is wrong with each site right now, for the list of sites: a log that
- * stopped coming or was refused, a daily count late or withheld. A few
+ * stopped coming or was refused, a daily count late or withheld, a TLS
+ * certificate expired, ending soon or not trusted. A few
  * queries for every site; its server's are ServerAlerts.
  */
 final class SiteAlerts
@@ -35,6 +37,13 @@ final class SiteAlerts
     public const int WITHHELD_DAYS = 7;
 
     /**
+     * Days before a TLS certificate ends from which it is worth a look, then a problem.
+     */
+    public const int CERTIFICATE_WARN_DAYS = 21;
+
+    public const int CERTIFICATE_BAD_DAYS = 7;
+
+    /**
      * @param  Collection<int, Site>  $sites
      * @return array<int, list<array{tone: string, label: string, detail: string}>> by site id, worst first
      */
@@ -54,9 +63,12 @@ final class SiteAlerts
             ->groupBy('site_id')
             ->pluck(DB::raw('count(*)'), 'site_id');
 
+        $stacks = SiteStack::query()->whereIn('site_id', $ids)->get()->keyBy('site_id');
+
         return $sites->mapWithKeys(fn (Site $site) => [$site->id => self::worstFirst([
             ...self::log($statuses->get($site->id)),
             ...self::count($statuses->get($site->id), $lastCounts->get($site->id), (int) $withheld->get($site->id, 0)),
+            ...self::certificate($stacks->get($site->id)),
         ])])->all();
     }
 
@@ -110,6 +122,44 @@ final class SiteAlerts
             $alerts[] = self::alert('warn', __('Daily count late'), $countedAt === null
                 ? __('No day has been counted yet, though the log came :when.', ['when' => $logsSince->diffForHumans()])
                 : __('The last day was counted :when.', ['when' => $countedAt->diffForHumans()]));
+        }
+
+        return $alerts;
+    }
+
+    /**
+     * The site's TLS certificate, as last read: expired, ending soon (a
+     * renewal that does not happen), or not trusted by browsers.
+     *
+     * @return list<array{tone: string, label: string, detail: string}>
+     */
+    private static function certificate(?SiteStack $stack): array
+    {
+        $certificate = collect($stack?->hosts ?? [])->firstWhere('role', 'site')['certificate'] ?? null;
+
+        if ($certificate === null) {
+            return [];
+        }
+
+        $expiresAt = now()->parse($certificate['expires_at']);
+        $days = (int) floor(now()->diffInDays($expiresAt, false));
+
+        if ($expiresAt->isPast()) {
+            return [self::alert('bad', __('Certificate expired'), __('The site\'s TLS certificate expired :when: browsers refuse the site.', ['when' => $expiresAt->diffForHumans()]))];
+        }
+
+        $alerts = [];
+
+        if ($days < self::CERTIFICATE_WARN_DAYS) {
+            $alerts[] = self::alert(
+                $days < self::CERTIFICATE_BAD_DAYS ? 'bad' : 'warn',
+                trans_choice('Certificate ends in :count day|Certificate ends in :count days', $days),
+                __('The site\'s TLS certificate ends on :date. An automatic renewal (Let\'s Encrypt renews 30 days ahead) did not happen: check certbot or your host.', ['date' => $expiresAt->toDateString()]),
+            );
+        }
+
+        if (! $certificate['trusted']) {
+            $alerts[] = self::alert('bad', __('Certificate not trusted'), __('Browsers do not trust the site\'s TLS certificate: self-signed, an incomplete chain, or names that do not cover the site.'));
         }
 
         return $alerts;

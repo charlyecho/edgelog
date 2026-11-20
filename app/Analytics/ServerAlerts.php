@@ -3,6 +3,7 @@
 namespace App\Analytics;
 
 use App\Analytics\Server\ServerRange;
+use App\Analytics\Stack\ServerSoftware;
 use App\Models\Server;
 use App\Models\ServerMetricMinute;
 use Illuminate\Support\Collection;
@@ -11,7 +12,9 @@ use Illuminate\Support\Number;
 
 /**
  * What is wrong with each server right now, from its last sample: gone
- * quiet, busy, short of memory or of disk. Two queries for every server.
+ * quiet, busy, short of memory or of disk; and what runs on it: a system or
+ * a branch no longer supported, known flaws an update fixes. Two queries
+ * for every server.
  */
 final class ServerAlerts
 {
@@ -54,9 +57,10 @@ final class ServerAlerts
             ->groupBy('server_id')
             ->pluck(DB::raw('avg(cpu)'), 'server_id');
 
-        return $servers->mapWithKeys(fn (Server $server) => [$server->id => SiteAlerts::worstFirst(
-            self::alerts($latest->get($server->id), $cpu->has($server->id) ? (float) $cpu->get($server->id) : null),
-        )])->all();
+        return $servers->mapWithKeys(fn (Server $server) => [$server->id => SiteAlerts::worstFirst([
+            ...self::alerts($latest->get($server->id), $cpu->has($server->id) ? (float) $cpu->get($server->id) : null),
+            ...ServerSoftware::alerts($server->software),
+        ])])->all();
     }
 
     /**

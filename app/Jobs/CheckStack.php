@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Analytics\SiteHosts;
+use App\Analytics\Stack\CertificateReader;
 use App\Analytics\Stack\EndOfLife;
 use App\Analytics\Stack\StackDetector;
 use App\Models\Site;
@@ -21,7 +22,8 @@ use Throwable;
  * limit), and the hosts it loads WordPress files from. On a WordPress host,
  * /wp-login.php is asked once, without following it: a 2xx answer is a
  * login page open to the internet. Each version is then set against its
- * branch on endoflife.date.
+ * branch on endoflife.date. Each host's TLS certificate is read too: when
+ * it ends, and whether browsers trust it.
  */
 class CheckStack implements ShouldBeUnique, ShouldQueue
 {
@@ -38,7 +40,7 @@ class CheckStack implements ShouldBeUnique, ShouldQueue
         return (string) $this->site->id;
     }
 
-    public function handle(EndOfLife $endOfLife): void
+    public function handle(EndOfLife $endOfLife, CertificateReader $certificates): void
     {
         $own = SiteHosts::of($this->site)->hosts;
         $siteHost = strtolower((string) parse_url($this->site->url, PHP_URL_HOST));
@@ -47,7 +49,12 @@ class CheckStack implements ShouldBeUnique, ShouldQueue
 
         while ($hosts !== [] && count($checked) < 1 + self::MAX_ORIGINS) {
             ['host' => $host, 'role' => $role] = array_shift($hosts);
-            $row = ['host' => $host, 'role' => $role, 'status' => null, 'products' => [], 'login' => null, 'error' => null];
+            $row = ['host' => $host, 'role' => $role, 'status' => null, 'products' => [], 'login' => null, 'error' => null, 'certificate' => null];
+
+            // Read apart from the page: an expired certificate fails the page, and is what to say.
+            if (FetchRobotsTxt::isPublic($host)) {
+                $row['certificate'] = $certificates->read($host);
+            }
 
             try {
                 [$responses, $body] = $this->home($host);

@@ -29,6 +29,8 @@ final class EndOfLife
         'php' => 'php', 'nginx' => 'nginx', 'apache' => 'apache-http-server', 'caddy' => 'caddy', 'nodejs' => 'nodejs',
         'nextjs' => 'nextjs', 'wordpress' => 'wordpress', 'drupal' => 'drupal', 'joomla' => 'joomla', 'laravel' => 'laravel',
         'symfony' => 'symfony', 'django' => 'django', 'rails' => 'rails', 'magento' => 'magento',
+        'mysql' => 'mysql', 'mariadb' => 'mariadb', 'ubuntu' => 'ubuntu', 'debian' => 'debian', 'postgresql' => 'postgresql',
+        'redis' => 'redis', 'openssl' => 'openssl', 'linux' => 'linux', 'memcached' => 'memcached',
     ];
 
     /**
