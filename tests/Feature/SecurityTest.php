@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Analytics\Security\SecurityPeriod;
+use App\Analytics\SitePeriod;
 use App\Enums\CountKind;
 use App\Enums\DayStatus;
 use App\Ingest\IngestLog;
@@ -217,5 +219,26 @@ class SecurityTest extends TestCase
         $this->assertSame(0, $day->suspects()->count());
         $this->assertSame(0, $day->attacks()->count());
         $this->assertSame(7, $day->security()->first()->figures['probes']);
+    }
+
+    public function test_the_attacks_tab_lists_the_episodes_with_the_most_requests_first(): void
+    {
+        $day = $this->collect();
+        $day->attacks()->delete();
+
+        foreach ([40, 900, 120, 900, 75] as $index => $requests) {
+            $day->attacks()->create([
+                'kind' => 'burst', 'address' => "203.0.113.{$index}", 'requests' => $requests,
+                'started_at' => '2026-10-21 03:00:00', 'ended_at' => '2026-10-21 03:01:00',
+                'paths' => ['/' => $requests], 'answered' => ['2xx' => $requests],
+            ]);
+        }
+        $day->attacks()->create(['kind' => 'login', 'address' => '203.0.113.99', 'requests' => 5000, 'started_at' => '2026-10-21 03:00:00', 'ended_at' => '2026-10-21 03:01:00', 'paths' => [], 'answered' => []]);
+
+        $security = new SecurityPeriod(SitePeriod::choose($this->site, '30'));
+        $bursts = $security->attacks('burst', limit: 3);
+
+        $this->assertSame(['203.0.113.1', '203.0.113.3', '203.0.113.2'], $bursts->pluck('address')->all(), 'Most requests first, the older of a tie first, at most the limit.');
+        $this->assertSame(['/' => 900], $bursts->first()->paths);
     }
 }

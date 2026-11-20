@@ -100,11 +100,24 @@ final class SecurityPeriod
     }
 
     /**
-     * @return Builder<SiteDayAttack>
+     * The episodes of one kind with the most requests, most first. Only
+     * their ids are sorted, then the rows read: sorting whole rows, their
+     * paths and answers (JSON) with them, runs MySQL out of sort memory.
+     *
+     * @return Collection<int, SiteDayAttack>
      */
-    public function attacks(string $kind): Builder
+    public function attacks(string $kind, int $limit = 200): Collection
     {
-        return SiteDayAttack::query()->whereIn('site_day_id', $this->period->verified()->pluck('id'))->where('kind', $kind)->orderByDesc('requests');
+        $ids = SiteDayAttack::query()
+            ->whereIn('site_day_id', $this->period->verified()->pluck('id'))
+            ->where('kind', $kind)
+            ->orderByDesc('requests')
+            ->orderBy('id')
+            ->limit($limit)
+            ->pluck('id');
+        $order = $ids->flip();
+
+        return SiteDayAttack::query()->whereIn('id', $ids)->get()->sortBy(fn (SiteDayAttack $attack) => $order[$attack->id])->values();
     }
 
     /**

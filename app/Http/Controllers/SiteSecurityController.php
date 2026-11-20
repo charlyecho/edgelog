@@ -85,8 +85,8 @@ class SiteSecurityController extends Controller
     public function attacks(Request $request, Team $team, Site $site): View
     {
         return $this->tab($request, $team, $site, 'attacks', fn (SecurityPeriod $security) => [
-            'logins' => $security->attacks('login')->limit(200)->get(),
-            'bursts' => $security->attacks('burst')->limit(200)->get(),
+            'logins' => $security->attacks('login'),
+            'bursts' => $security->attacks('burst'),
             'signs' => $security->signs(),
         ]);
     }

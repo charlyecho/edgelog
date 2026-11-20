@@ -57,7 +57,7 @@ final class AddressReport
     {
         $this->rows = $security->suspects()->where('address', $address)->get();
         $this->attacks = SiteDayAttack::query()->whereIn('site_day_id', $security->period->verified()->pluck('id'))
-            ->where('address', $address)->orderByDesc('started_at')->get();
+            ->where('address', $address)->get()->sortByDesc('started_at')->values();
 
         $this->readLog();
     }
