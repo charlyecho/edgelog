@@ -162,16 +162,18 @@ final class SecurityPeriod
     /**
      * The suspects summed by address, worst first: probes, then attack
      * attempts, then requests. Read as plain rows, their lists decoded once:
-     * a month holds thousands of them.
+     * a month holds thousands of them, so a filter on their figures belongs
+     * in $where, the database's to do.
      *
      * @param  ?callable(object): bool  $keep  given each row, with its lists decoded
+     * @param  ?callable(Builder<SiteDaySuspect>): mixed  $where  narrows the rows read, before their lists are decoded
      * @return list<array{address: string, country: string, first_seen_at: CarbonImmutable, requests: int, probes: int, attempts: int, fake_requests: int, categories: array<string, int>, answered: array<string, int>, paths: array<string, int>, signs: list<string>, days: int}>
      */
-    public function byAddress(?callable $keep = null): array
+    public function byAddress(?callable $keep = null, ?callable $where = null): array
     {
         $rows = [];
 
-        foreach ($this->suspects()->toBase()->get() as $suspect) {
+        foreach ($this->suspects()->when($where !== null, $where)->toBase()->get() as $suspect) {
             foreach (['categories', 'answered', 'paths', 'signs'] as $list) {
                 $suspect->{$list} = json_decode((string) $suspect->{$list}, true) ?? [];
             }

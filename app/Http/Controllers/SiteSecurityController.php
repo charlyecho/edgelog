@@ -73,8 +73,10 @@ class SiteSecurityController extends Controller
             'category' => $category,
             'everyone' => $everyone,
             'probedPaths' => $security->probedPaths($category),
-            'rows' => $security->byAddress(fn ($suspect) => ($everyone || $suspect->probes > 0)
-                && ($category === null || isset($suspect->categories[$category]))),
+            'rows' => $security->byAddress(
+                fn ($suspect) => $category === null || isset($suspect->categories[$category]),
+                fn ($query) => $query->when(! $everyone, fn ($query) => $query->where('probes', '>', 0)),
+            ),
         ]);
     }
 
@@ -97,7 +99,7 @@ class SiteSecurityController extends Controller
     public function fake(Request $request, Team $team, Site $site): View
     {
         return $this->tab($request, $team, $site, 'fake', fn (SecurityPeriod $security) => [
-            'rows' => $security->byAddress(fn ($suspect) => $suspect->fake_requests > 0),
+            'rows' => $security->byAddress(where: fn ($query) => $query->where('fake_requests', '>', 0)),
         ]);
     }
 
@@ -162,7 +164,7 @@ class SiteSecurityController extends Controller
      */
     private function blockList(SecurityPeriod $security): array
     {
-        $addresses = $security->byAddress(fn ($suspect) => $suspect->probes > 0 || $suspect->attempts > 0);
+        $addresses = $security->byAddress(where: fn ($query) => $query->where(fn ($query) => $query->where('probes', '>', 0)->orWhere('attempts', '>', 0)));
         $networks = [];
 
         foreach ($addresses as $row) {

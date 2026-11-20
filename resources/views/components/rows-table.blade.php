@@ -1,12 +1,18 @@
-@props(['title' => null, 'unit' => null, 'columns', 'rows', 'shown' => 10, 'empty' => null])
+@props(['title' => null, 'unit' => null, 'columns', 'rows', 'shown' => 10, 'max' => 200, 'empty' => null])
 
 {{--
     A table of figures: its columns are [label, 'left'|'right'], each row a
     list of cells. A cell is text, or [label, icon?, flag?, tile?, note?, mono?, tone?, href?, drawer?]:
     with href, the label is a link; with drawer, it opens in the side panel.
-    Rows past $shown stay hidden behind "See all".
+    Rows past $shown stay hidden behind "See all"; only the first $max are
+    written in the page at all, so a period with thousands of addresses
+    stays a light page.
 --}}
-@php($icons = [])
+@php
+    $icons = [];
+    $total = count($rows);
+    $rows = array_slice($rows, 0, $max);
+@endphp
 
 <section {{ $attributes->class('rounded-[10px] border border-rule bg-surface p-4 shadow-card') }} data-top-list>
     @if ($title || count($rows) > $shown)
@@ -20,7 +26,7 @@
                 @endif
             </div>
             @if (count($rows) > $shown)
-                <button type="button" class="cursor-pointer text-[13px] whitespace-nowrap text-ink-2 hover:text-ink" data-see-all data-less="{{ __('Show less') }}">{{ __('See all :count', ['count' => number_format(count($rows))]) }}</button>
+                <button type="button" class="cursor-pointer text-[13px] whitespace-nowrap text-ink-2 hover:text-ink" data-see-all data-less="{{ __('Show less') }}">{{ $total > $max ? __('See the first :count', ['count' => number_format($max)]) : __('See all :count', ['count' => number_format($total)]) }}</button>
             @endif
         </header>
     @endif
@@ -82,6 +88,9 @@
                 </tbody>
             </table>
         </div>
+        @if ($total > $max)
+            <p class="mt-2 hidden text-xs text-ink-3" data-extra>{{ __('The first :max of :total are listed.', ['max' => number_format($max), 'total' => number_format($total)]) }}</p>
+        @endif
     @endif
 
     {{ $slot }}
