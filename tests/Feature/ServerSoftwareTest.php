@@ -174,7 +174,7 @@ class ServerSoftwareTest extends TestCase
     public function test_software_that_does_not_read_is_refused(): void
     {
         $this->send(['os' => 'ubuntu', 'os_version' => '22.04', 'programs' => [['product' => 'php']]])->assertStatus(400);
-        $this->send(['os' => 'ubuntu', 'os_version' => '22.04', 'programs' => array_fill(0, 33, ['product' => 'php', 'version' => '8.3.1'])])->assertStatus(400);
+        $this->send(['os' => 'ubuntu', 'os_version' => '22.04', 'programs' => array_fill(0, 65, ['product' => 'php', 'version' => '8.3.1'])])->assertStatus(400);
     }
 
     public function test_each_program_is_judged_by_the_tracker_of_where_it_was_built(): void
@@ -270,6 +270,7 @@ class ServerSoftwareTest extends TestCase
         $this->assertFalse($build('1:10.11.9+maria~ubu2204'));
         $this->assertFalse($build('8.0.39-1ubuntu22.04'));
         $this->assertFalse($build('8.0.39-1debian12'));
+        $this->assertFalse(ServerSoftware::isDistroBuild(['product' => 'nodejs', 'version' => '22.23.2', 'package' => 'nvm', 'package_version' => null], 'ubuntu'), 'A Node of nvm is judged upstream.');
         $this->assertFalse(ServerSoftware::isDistroBuild(['product' => 'x', 'version' => '1.0', 'package' => 'x', 'package_version' => '1.0-1'], 'linuxmint'));
 
         $this->assertSame('Ubuntu:22.04:LTS', ServerSoftware::ecosystem('ubuntu', '22.04'));

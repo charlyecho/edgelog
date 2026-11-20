@@ -148,7 +148,7 @@
             <div class="border-b border-grid px-4 py-3 text-[13px] last:border-b-0">
                 <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                     <span class="font-bold">{{ ServerSoftware::label($program) }}</span>
-                    @if ($program['package_version'] !== null)
+                    @if ($program['package'] !== null)
                         <code class="font-mono text-xs text-ink-3">{{ $program['package'] }} {{ $program['package_version'] }}</code>
                     @endif
                     @if ($status !== null && isset($statusWords[$status]))

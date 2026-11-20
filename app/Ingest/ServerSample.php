@@ -25,7 +25,7 @@ final readonly class ServerSample
     /**
      * The most programs one sample may name.
      */
-    public const int MAX_PROGRAMS = 32;
+    public const int MAX_PROGRAMS = 64;
 
     /**
      * @param  array<string, int|float|null>  $figures
