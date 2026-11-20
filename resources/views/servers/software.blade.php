@@ -119,7 +119,18 @@
                             @else
                                 <span class="font-mono text-xs">{{ implode(' ', $state['listening']) }}</span>
                                 @foreach ($exposed as $service)
-                                    <span class="block text-warn">{{ __(':service on :address', ['service' => $service['service'], 'address' => $service['address']]) }}</span>
+                                    @php
+                                        $reached = $software['exposure']['ports'][(string) $service['port']] ?? null;
+                                    @endphp
+                                    <span @class(['block', 'text-bad' => $reached === 'open', 'text-good' => $reached === 'closed', 'text-warn' => $reached === null, 'text-ink-3' => $reached === 'unknown'])>
+                                        {{ __(':service on :address', ['service' => $service['service'], 'address' => $service['address']]) }} ·
+                                        {{ match ($reached) {
+                                            'open' => __('answers from the internet'),
+                                            'closed' => __('closed from outside'),
+                                            'unknown' => __('cannot be tried from outside'),
+                                            default => __('not tried from outside yet'),
+                                        } }}
+                                    </span>
                                 @endforeach
                             @endif
                         </dd>

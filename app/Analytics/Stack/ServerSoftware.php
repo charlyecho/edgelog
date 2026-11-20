@@ -22,7 +22,7 @@ use App\Analytics\SiteAlerts;
  * @phpstan-type Flaw array{id: string, severity: ?string, score: ?float, fixed: ?string}
  * @phpstan-type Program array{product: string, version: string, package: ?string, package_version: ?string, settings?: ?array<string, string>, source?: string, status?: string, cycle?: ?string, latest?: ?string, eol?: ?string, newest?: ?string, flaws?: ?list<Flaw>}
  * @phpstan-type SystemState array{reboot_required: ?bool, reboot_packages: list<string>, updates: ?int, security_updates: ?int, unattended_upgrades: ?bool, listening: ?list<string>, ssh: ?array{permit_root_login: ?string, password_authentication: ?string, partial: bool}, failed_units: ?list<string>}
- * @phpstan-type Software array{os: ?string, os_version: ?string, os_status?: ?array{status: string, cycle: ?string, latest: ?string, eol: ?string, newest: ?string}, programs: list<Program>, system?: ?SystemState}
+ * @phpstan-type Software array{os: ?string, os_version: ?string, os_status?: ?array{status: string, cycle: ?string, latest: ?string, eol: ?string, newest: ?string}, programs: list<Program>, system?: ?SystemState, exposure?: ?array{address: ?string, checked_at: string, ports: array<string, string>}}
  */
 final class ServerSoftware
 {
@@ -116,7 +116,8 @@ final class ServerSoftware
 
     /**
      * Whether the shipper says other programs run on the machine than those
-     * kept: the system's state and the settings change without a new judgement.
+     * kept, or other private services listen on every interface: the rest of
+     * the system's state and the settings change without a new judgement.
      *
      * @param  ?Software  $kept
      * @param  Software  $reported
@@ -133,7 +134,9 @@ final class ServerSoftware
             array_map(self::identity(...), $software['programs'] ?? []),
         ];
 
-        return $plain($kept) !== $plain($reported);
+        $exposed = fn (array $software) => array_map(fn (array $service) => [$service['port'], $service['family']], self::exposedServices($software['system'] ?? null));
+
+        return $plain($kept) !== $plain($reported) || $exposed($kept) !== $exposed($reported);
     }
 
     /**
@@ -163,6 +166,8 @@ final class ServerSoftware
         if (($kept['os'] ?? null) === $reported['os'] && ($kept['os_version'] ?? null) === $reported['os_version']) {
             $reported['os_status'] = $kept['os_status'] ?? null;
         }
+
+        $reported['exposure'] = $kept['exposure'] ?? null;
 
         return $reported;
     }
@@ -280,7 +285,7 @@ final class ServerSoftware
      * should not: every interface (0.0.0.0, ::, *) or a public address.
      *
      * @param  ?SystemState  $system
-     * @return list<array{service: string, port: int, address: string}>
+     * @return list<array{service: string, port: int, address: string, family: string}> family: v4, v6, or any
      */
     public static function exposedServices(?array $system): array
     {
@@ -303,12 +308,52 @@ final class ServerSoftware
             $everywhere = in_array($host, ['0.0.0.0', '::', '*'], true);
             $public = filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false;
 
-            if (($everywhere || $public) && ! isset($exposed[$port])) {
-                $exposed[$port] = ['service' => self::PRIVATE_SERVICES[$port], 'port' => $port, 'address' => $address];
+            if (! $everywhere && ! $public) {
+                continue;
             }
+
+            $family = match (true) {
+                $host === '*' => 'any',
+                str_contains($host, ':') => 'v6',
+                default => 'v4',
+            };
+
+            if (isset($exposed[$port]) && $exposed[$port]['family'] !== $family) {
+                $exposed[$port]['family'] = 'any';
+            }
+
+            $exposed[$port] ??= ['service' => self::PRIVATE_SERVICES[$port], 'port' => $port, 'address' => $address, 'family' => $family];
         }
 
         return array_values($exposed);
+    }
+
+    /**
+     * Whether each service open on every interface answers from outside,
+     * tried from Edgelog on the address the server's samples come from:
+     * "open", "closed", or "unknown" (a private address, Edgelog's own
+     * machine, or an address of another family than the service's).
+     *
+     * @param  ?SystemState  $system
+     * @return array{address: ?string, checked_at: string, ports: array<string, string>}
+     */
+    public static function reach(?array $system, ?string $address, PortProbe $probe): array
+    {
+        $ports = [];
+        $family = $address === null ? null : (str_contains($address, ':') ? 'v6' : 'v4');
+
+        foreach (self::exposedServices($system) as $exposed) {
+            $answers = $address !== null && in_array($exposed['family'], ['any', $family], true)
+                ? $probe->answers($address, $exposed['port'])
+                : null;
+            $ports[(string) $exposed['port']] = match ($answers) {
+                true => 'open',
+                false => 'closed',
+                null => 'unknown',
+            };
+        }
+
+        return ['address' => $address, 'checked_at' => now()->toIso8601String(), 'ports' => $ports];
     }
 
     /**
@@ -347,7 +392,7 @@ final class ServerSoftware
             return [];
         }
 
-        return [...self::softwareAlerts($software), ...self::systemAlerts($software['system'] ?? null)];
+        return [...self::softwareAlerts($software), ...self::systemAlerts($software['system'] ?? null, $software['exposure'] ?? null)];
     }
 
     /**
@@ -393,9 +438,10 @@ final class ServerSoftware
 
     /**
      * @param  ?SystemState  $system
+     * @param  ?array{address: ?string, checked_at: string, ports: array<string, string>}  $exposure
      * @return list<array{tone: string, label: string, detail: string}>
      */
-    private static function systemAlerts(?array $system): array
+    private static function systemAlerts(?array $system, ?array $exposure): array
     {
         if ($system === null) {
             return [];
@@ -420,8 +466,17 @@ final class ServerSoftware
         }
 
         foreach (self::exposedServices($system) as $exposed) {
-            $alerts[] = SiteAlerts::alert('warn', __(':service open to all', ['service' => $exposed['service']]), __('It listens on :address: anyone on the internet reaches it unless a firewall closes port :port. Bind it to 127.0.0.1 or a private address, or check the firewall (ufw status).', ['address' => $exposed['address'], 'port' => $exposed['port']]));
+            $words = ['service' => $exposed['service'], 'address' => $exposed['address'], 'port' => $exposed['port'], 'public' => $exposure['address'] ?? '—'];
+
+            $alerts[] = match ($exposure['ports'][(string) $exposed['port']] ?? null) {
+                'closed' => null,
+                'open' => SiteAlerts::alert('bad', __(':service open to the internet', $words), __('Port :port answered Edgelog from outside, on :public: anyone reaches :service. Bind it to 127.0.0.1 or a private address, or close the port in the firewall.', $words)),
+                'unknown' => SiteAlerts::alert('muted', __(':service on every interface', $words), __('It listens on :address, and Edgelog cannot try it from outside (it runs on this machine, or the server\'s address is private): make sure the firewall closes port :port.', $words)),
+                default => SiteAlerts::alert('warn', __(':service on every interface', $words), __('It listens on :address, not tried from outside yet: anyone on the internet reaches it unless a firewall closes port :port.', $words)),
+            };
         }
+
+        $alerts = array_values(array_filter($alerts));
 
         $ssh = self::sshSettings($system);
 

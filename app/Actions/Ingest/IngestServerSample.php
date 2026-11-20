@@ -42,9 +42,9 @@ class IngestServerSample
         $server = $this->server($site, $sample);
         $minute = now()->startOfMinute();
 
-        $server->forceFill(['last_sample_at' => $minute, 'hostname' => $sample->hostname ?? $server->hostname]);
+        $server->forceFill(['last_sample_at' => $minute, 'hostname' => $sample->hostname ?? $server->hostname, 'public_address' => $request->ip()]);
 
-        $softwareChanged = $sample->software !== null && ServerSoftware::changed($server->software, $sample->software);
+        $softwareChanged = $sample->software !== null && (ServerSoftware::changed($server->software, $sample->software) || $server->isDirty('public_address'));
 
         if ($sample->software !== null) {
             $server->forceFill(['software' => ServerSoftware::withJudgements($server->software, $sample->software), 'software_read_at' => now()]);

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Analytics\Stack\PortProbe;
 use App\Analytics\Stack\ServerSoftware;
 use App\Jobs\CheckServerSoftware;
 use App\Models\Server;
@@ -23,6 +24,11 @@ class ServerSoftwareTest extends TestCase
     private Site $site;
 
     private string $token;
+
+    /**
+     * The address the shipper's samples come from.
+     */
+    private string $shipperAddress = '127.0.0.1';
 
     protected function setUp(): void
     {
@@ -74,8 +80,9 @@ class ServerSoftwareTest extends TestCase
             ...($software === null ? [] : ['software' => $software]),
         ];
         $headers = ['Authorization' => "Bearer {$this->token}", 'Content-Type' => 'application/json', 'Content-Encoding' => 'gzip', 'X-Edgelog-Metrics' => '1'];
+        $server = [...$this->transformHeadersToServerVars($headers), 'REMOTE_ADDR' => $this->shipperAddress];
 
-        return $this->call('POST', route('ingest.metrics', $this->site), [], [], [], $this->transformHeadersToServerVars($headers), gzencode(json_encode($sample)));
+        return $this->call('POST', route('ingest.metrics', $this->site), [], [], [], $server, gzencode(json_encode($sample)));
     }
 
     /**
@@ -315,8 +322,8 @@ class ServerSoftwareTest extends TestCase
         $this->assertSame([['bad', '2 failed services']], $this->stateAlerts(['failed_units' => ['php8.3-fpm.service', 'horizon.service']]));
         $this->assertSame([['warn', '3 security updates']], $this->stateAlerts(['updates' => 12, 'security_updates' => 3]));
         $this->assertSame([['warn', 'Reboot needed']], $this->stateAlerts(['reboot_required' => true, 'reboot_packages' => ['linux-image-6.8.0-150-generic']]));
-        $this->assertSame([['warn', 'Redis open to all'], ['warn', 'MySQL / MariaDB open to all']], $this->stateAlerts(['listening' => ['*:6379', '127.0.0.1:6379', '[::]:3306', '[::]:3306']]));
-        $this->assertSame([['warn', 'PostgreSQL open to all']], $this->stateAlerts(['listening' => ['203.0.113.7:5432', '192.168.1.4:3306']]));
+        $this->assertSame([['warn', 'Redis on every interface'], ['warn', 'MySQL / MariaDB on every interface']], $this->stateAlerts(['listening' => ['*:6379', '127.0.0.1:6379', '[::]:3306', '[::]:3306']]), 'Not tried from outside yet.');
+        $this->assertSame([['warn', 'PostgreSQL on every interface']], $this->stateAlerts(['listening' => ['203.0.113.7:5432', '192.168.1.4:3306']]));
     }
 
     public function test_ssh_is_judged_with_its_defaults_where_its_files_say_nothing(): void
@@ -388,5 +395,88 @@ class ServerSoftwareTest extends TestCase
             ->assertSee('failed: horizon.service')
             ->assertSee('passwords: no')
             ->assertSee('0.0.0.0:80');
+    }
+
+    /**
+     * A probe that answers by port, and records what it was asked.
+     *
+     * @param  array<int, ?bool>  $answers
+     */
+    private function probe(array $answers): PortProbe
+    {
+        $probe = new class($answers) extends PortProbe
+        {
+            /** @var list<string> */
+            public array $asked = [];
+
+            /**
+             * @param  array<int, ?bool>  $answers
+             */
+            public function __construct(private array $answers) {}
+
+            public function answers(string $address, int $port): ?bool
+            {
+                $this->asked[] = "{$address}:{$port}";
+
+                return array_key_exists($port, $this->answers) ? $this->answers[$port] : false;
+            }
+        };
+        $this->app->instance(PortProbe::class, $probe);
+
+        return $probe;
+    }
+
+    public function test_a_service_on_every_interface_is_tried_from_outside_on_the_samples_address(): void
+    {
+        Queue::fake();
+        $probe = $this->probe([6379 => true, 3306 => false, 11211 => null]);
+        $this->shipperAddress = '203.0.113.50';
+        $this->send([...$this->software(), 'system' => $this->state(['listening' => ['0.0.0.0:6379', '0.0.0.0:3306', '0.0.0.0:11211', '0.0.0.0:443']])])->assertOk();
+
+        $this->assertSame('203.0.113.50', $this->server()->public_address);
+        $this->check();
+
+        $this->assertEqualsCanonicalizing(['203.0.113.50:6379', '203.0.113.50:3306', '203.0.113.50:11211'], $probe->asked);
+        $this->assertSame(['6379' => 'open', '3306' => 'closed', '11211' => 'unknown'], $this->server()->software['exposure']['ports']);
+
+        $alerts = collect(ServerSoftware::alerts($this->server()->software))->filter(fn (array $alert) => str_contains($alert['label'], 'Redis') || str_contains($alert['label'], 'MySQL') || str_contains($alert['label'], 'Memcached'));
+        $this->assertSame([['bad', 'Redis open to the internet'], ['muted', 'Memcached on every interface']], $alerts->map(fn (array $alert) => [$alert['tone'], $alert['label']])->values()->all(), 'A port the firewall closes is no alert.');
+    }
+
+    public function test_what_was_tried_from_outside_stays_until_tried_again(): void
+    {
+        Queue::fake();
+        $this->probe([6379 => false]);
+        $this->shipperAddress = '203.0.113.50';
+        $system = $this->state(['listening' => ['0.0.0.0:6379']]);
+        $this->send([...$this->software(), 'system' => $system])->assertOk();
+        $this->check();
+
+        $this->travel(1)->hours();
+        $this->send([...$this->software(), 'system' => [...$system, 'updates' => 3]])->assertOk();
+
+        $this->assertSame(['6379' => 'closed'], $this->server()->software['exposure']['ports']);
+        Queue::assertPushed(CheckServerSoftware::class, 1);
+    }
+
+    public function test_a_service_of_another_address_family_is_not_tried(): void
+    {
+        $probe = new class extends PortProbe
+        {
+            public function answers(string $address, int $port): ?bool
+            {
+                throw new \RuntimeException('Not to be tried.');
+            }
+        };
+
+        $reach = ServerSoftware::reach(ServerSoftware::reported(['programs' => [], 'system' => $this->state(['listening' => ['0.0.0.0:6379']])])['system'], '2001:db8::1', $probe);
+
+        $this->assertSame(['6379' => 'unknown'], $reach['ports']);
+    }
+
+    public function test_the_probe_does_not_try_a_private_address(): void
+    {
+        $this->assertNull((new PortProbe)->answers('10.0.0.5', 6379));
+        $this->assertNull((new PortProbe)->answers('127.0.0.1', 6379));
     }
 }
