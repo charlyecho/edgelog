@@ -14,6 +14,9 @@ use Illuminate\Support\Facades\Validator;
  * its /etc/machine-id) and its host name tell which server it is; a shipper
  * older than them sends neither. Once an hour, a sample also says what runs
  * on the machine (null in the others, and from a shipper older than 1.4.0).
+ * A shipper given their status pages (1.5.0) adds PHP-FPM's pools, summed
+ * up, and nginx; a sample without them leaves those of its minute as they
+ * are, sent by another site's shipper on the same machine.
  */
 final readonly class ServerSample
 {
@@ -59,6 +62,7 @@ final readonly class ServerSample
         $load = ['required', 'numeric', 'min:0', 'max:100000'];
 
         $validator = Validator::make($sample, [
+            ...self::webServerRules($sample),
             'uptime' => [...$count, 'max:4294967295'],
             'cores' => ['required', 'integer', 'between:1,65535'],
             'cpu' => $share,
@@ -115,9 +119,79 @@ final readonly class ServerSample
         $machineId = $valid['machine_id'] ?? null;
         $hostname = isset($valid['hostname']) && trim($valid['hostname']) !== '' ? trim($valid['hostname']) : null;
         $software = isset($valid['software']) ? ServerSoftware::reported($valid['software']) : null;
-        unset($valid['disks'], $valid['machine_id'], $valid['hostname'], $valid['software']);
+        $webServer = self::webServerFigures($valid);
+        unset($valid['disks'], $valid['machine_id'], $valid['hostname'], $valid['software'], $valid['php_fpm'], $valid['nginx']);
 
-        return new self($valid, $disks, $machineId, $hostname, $software);
+        return new self([...$valid, ...$webServer], $disks, $machineId, $hostname, $software);
+    }
+
+    /**
+     * The rules of PHP-FPM's and nginx's figures, for those the sample has.
+     *
+     * @param  array<string, mixed>  $sample
+     * @return array<string, list<string>>
+     */
+    private static function webServerRules(array $sample): array
+    {
+        $count = ['required', 'integer', 'min:0', 'max:4294967295'];
+        $sinceBefore = ['present', 'nullable', 'integer', 'min:0', 'max:4294967295'];
+        $perSecond = ['present', 'nullable', 'numeric', 'min:0', 'max:10000000'];
+        $rules = [];
+
+        if (isset($sample['php_fpm'])) {
+            $rules = [
+                'php_fpm' => ['array'],
+                'php_fpm.pools' => ['required', 'integer', 'between:1,64'],
+                'php_fpm.active' => $count,
+                'php_fpm.total' => $count,
+                'php_fpm.queue' => $count,
+                'php_fpm.requests' => $perSecond,
+                'php_fpm.saturated' => $sinceBefore,
+                'php_fpm.slow' => $sinceBefore,
+            ];
+        }
+
+        if (isset($sample['nginx'])) {
+            $rules = [
+                ...$rules,
+                'nginx' => ['array'],
+                'nginx.connections' => $count,
+                'nginx.requests' => $perSecond,
+            ];
+        }
+
+        return $rules;
+    }
+
+    /**
+     * PHP-FPM's and nginx's figures as columns of server_metric_minutes,
+     * only those the sample has.
+     *
+     * @param  array<string, mixed>  $valid
+     * @return array<string, int|float|null>
+     */
+    private static function webServerFigures(array $valid): array
+    {
+        $figures = [];
+
+        if (isset($valid['php_fpm'])) {
+            $fpm = $valid['php_fpm'];
+            $figures = [
+                'fpm_active' => (int) $fpm['active'],
+                'fpm_total' => (int) $fpm['total'],
+                'fpm_queue' => (int) $fpm['queue'],
+                'fpm_requests' => $fpm['requests'] === null ? null : (float) $fpm['requests'],
+                'fpm_saturated' => $fpm['saturated'] === null ? null : (int) $fpm['saturated'],
+                'fpm_slow' => $fpm['slow'] === null ? null : (int) $fpm['slow'],
+            ];
+        }
+
+        if (isset($valid['nginx'])) {
+            $figures['nginx_connections'] = (int) $valid['nginx']['connections'];
+            $figures['nginx_requests'] = $valid['nginx']['requests'] === null ? null : (float) $valid['nginx']['requests'];
+        }
+
+        return $figures;
     }
 
     /**

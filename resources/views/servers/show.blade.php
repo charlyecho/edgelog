@@ -1,4 +1,4 @@
-<x-layouts.app :title="$server->name()" :lede="__('The server, as edgelog-ship --metrics reads it from /proc and df once a minute: how busy its processors are, its memory, load, disks and network. Each minute is kept :minutes days, each hour\'s averages and peaks :hours days.', ['minutes' => config('ingest.metrics_minute_days'), 'hours' => config('ingest.metrics_hour_days')])">
+<x-layouts.app :title="$server->name()" :lede="__('The server, as edgelog-ship --metrics reads it from /proc and df once a minute: how busy its processors are, its memory, load, disks and network, and PHP-FPM and nginx when it is given their status pages. Each minute is kept :minutes days, each hour\'s averages and peaks :hours days.', ['minutes' => config('ingest.metrics_minute_days'), 'hours' => config('ingest.metrics_hour_days')])">
     <x-slot:trail>
         <x-crumb :href="route('teams.sites.index', $team)">{{ $team->name }}</x-crumb>
         <x-crumb :href="route('teams.servers.index', $team)">{{ __('Servers') }}</x-crumb>

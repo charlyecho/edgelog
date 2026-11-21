@@ -45,4 +45,12 @@ class ShipperScriptTest extends TestCase
         $this->assertSame(2, $result->exitCode());
         $this->assertStringContainsString('--metrics goes with the shipper of the access log', $result->errorOutput());
     }
+
+    public function test_the_status_pages_go_with_the_servers_figures(): void
+    {
+        $result = Process::run(['sh', base_path('tools/edgelog-ship'), '--url', 'https://example.com/ingest/x', '--token-file', '/dev/null', '--log', '/dev/null', '--fpm-status', 'http://127.0.0.1:8081/php-fpm-status']);
+
+        $this->assertSame(2, $result->exitCode());
+        $this->assertStringContainsString('--fpm-status and --nginx-status go with --metrics', $result->errorOutput());
+    }
 }

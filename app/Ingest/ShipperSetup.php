@@ -118,6 +118,50 @@ final readonly class ShipperSetup
     }
 
     /**
+     * The local status pages of PHP-FPM and nginx that --fpm-status and
+     * --nginx-status read: one line in each pool, and an nginx server that
+     * only the machine itself reaches.
+     */
+    public static function statusPagesConfig(): string
+    {
+        return <<<'CONF'
+            # In each PHP-FPM pool, e.g. /etc/php/8.4/fpm/pool.d/www.conf, then reload php8.4-fpm:
+            pm.status_path = /php-fpm-status
+
+            # An nginx server on a local address only, e.g. /etc/nginx/sites-enabled/status, then reload nginx:
+            server {
+                listen 127.0.0.1:8081;
+
+                location /nginx_status {
+                    stub_status;
+                }
+
+                location /php-fpm-status {
+                    fastcgi_pass unix:/run/php/php8.4-fpm.sock;
+                    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+                    include fastcgi_params;
+                }
+            }
+            CONF;
+    }
+
+    /**
+     * Check the status pages answer, then add them to the shipper's service
+     * after --metrics, and restart it.
+     */
+    public static function enableStatusCommands(): string
+    {
+        $unit = '/etc/systemd/system/edgelog-ship.service';
+        $options = '--fpm-status http://127.0.0.1:8081/php-fpm-status --nginx-status http://127.0.0.1:8081/nginx_status';
+
+        return <<<SH
+            curl -s 'http://127.0.0.1:8081/php-fpm-status?json' && curl -s http://127.0.0.1:8081/nginx_status
+            sudo grep -q -- --fpm-status {$unit} || sudo sed -i 's|--metrics|& {$options}|' {$unit}
+            sudo systemctl daemon-reload && sudo systemctl restart edgelog-ship
+            SH;
+    }
+
+    /**
      * On a server that runs a shipper set up before --metrics: a new
      * shipper, --metrics added to its service, then a restart.
      */

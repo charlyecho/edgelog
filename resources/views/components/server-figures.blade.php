@@ -95,6 +95,8 @@
         ])->all()" :empty="__('No disk was read.')" />
 </div>
 
+<x-web-server-figures :range="$range" :timezone="$timezone" />
+
 <p class="text-xs text-ink-3">
     @if ($range->readsMinutes())
         {{ __('Each point is :minutes of samples. Busy shares and bytes a second are since the sample before, so the first one after the shipper starts has none.', ['minutes' => trans_choice(':count minute|:count minutes', intdiv($range->step(), 60))]) }}

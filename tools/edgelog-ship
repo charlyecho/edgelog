@@ -9,7 +9,7 @@
 #                  --log /var/log/nginx/access.log \
 #                  [--state /var/lib/edgelog-ship/state] \
 #                  [--batch-lines 2000] [--interval 10] [--from-end] [--once]
-#                  [--metrics]
+#                  [--metrics [--fpm-status <url>]... [--nginx-status <url>]]
 #
 #     edgelog-ship --url ... --token-file ... --errors laravel|codeigniter|craft|php \
 #                  --log '/home/forge/example.com/storage/logs/laravel.log' \
@@ -17,7 +17,7 @@
 #
 #     edgelog-ship --url ... --token-file ... --backfill /var/log/nginx/access.log*
 #
-#     edgelog-ship --print-metrics
+#     edgelog-ship --print-metrics [--fpm-status <url>]... [--nginx-status <url>]
 #
 # How it keeps every line, once:
 #
@@ -84,13 +84,24 @@
 # read over a second, with what runs on the machine, and exits; it needs no
 # URL or token.
 #
+# --fpm-status <url> (once per PHP-FPM pool) and --nginx-status <url> add the
+# web server to each sample: the pool's status page (pm.status_path, read as
+# JSON: ?json is added to a URL without a query) and nginx's stub_status,
+# both served on a local address only, e.g. http://127.0.0.1:8081/php-fpm-status.
+# The pools are summed up: the workers busy and started, the requests waiting
+# for one, the requests a second, and how many times pm.max_children was
+# reached and requests were slow (request_slowlog_timeout) since the sample
+# before; nginx's open connections and requests a second. The status request
+# itself is not counted. A page that does not answer in 3 seconds is left out
+# of the sample, never sent the token.
+#
 # The token is never put on a command line (other users could read it in
 # the process list): curl and wget read it from a file only this user reads.
 # The URL must be https://; plain http:// only to localhost, 127.0.0.1 or ::1.
 
 set -u
 
-VERSION=1.4.1
+VERSION=1.5.0
 MAX_BATCH_BYTES=4194304
 MAX_LINE=65536
 MAX_RETRY_AFTER=600
@@ -116,6 +127,8 @@ SOFTWARE_AT=0
 SOFTWARE_ADDED=0
 ERRORS=
 PATTERN=
+FPM_STATUS=
+NGINX_STATUS=
 
 say() {
     printf 'edgelog-ship: %s\n' "$*" >&2
@@ -155,9 +168,24 @@ machine_hash() {
 # first reading, or one after a reboot, has none (null).
 read_metrics() {
     df -P -k -x tmpfs -x devtmpfs -x squashfs -x overlay -x efivarfs 2>/dev/null > "$WORK/df"
+    read_status
     LC_ALL=C awk -v now="$(date +%s)" -v previous="$WORK/metrics.last" -v keep="$WORK/metrics.keep" -v df="$WORK/df" \
-        -v machine="$MACHINE" -v host="$(uname -n 2>/dev/null)" '
+        -v machine="$MACHINE" -v host="$(uname -n 2>/dev/null)" -v fpm="$WORK/fpm" -v nginx="$WORK/nginx" '
         function number(value) { return sprintf("%.0f", value) }
+        function per_second(now_value, then_value) {
+            return (elapsed > 0 && then_value != "" && then_value != "-" && now_value >= then_value + 0) ? sprintf("%.2f", (now_value - then_value) / elapsed) : "null"
+        }
+        function since(now_value, then_value) {
+            return (then_value != "" && then_value != "-" && now_value >= then_value + 0) ? number(now_value - then_value) : "null"
+        }
+        # A whole number of a JSON object on one line, by its key; empty when it has none.
+        function json_number(json, key,    at, rest) {
+            at = index(json, "\"" key "\":")
+            if (at == 0) return ""
+            rest = substr(json, at + length(key) + 3)
+            sub(/^[ \t]+/, "", rest)
+            return match(rest, /^[0-9]+/) ? substr(rest, 1, RLENGTH) : ""
+        }
         function rate(now_value, then_value) {
             return (elapsed > 0 && now_value >= then_value) ? number((now_value - then_value) / elapsed) : "null"
         }
@@ -214,15 +242,84 @@ read_metrics() {
                 disks = disks (count++ ? "," : "") "{\"mount\":" text(mount) ",\"size\":" number(field[2] * 1024) ",\"used\":" number(field[3] * 1024) ",\"free\":" number(field[4] * 1024) "}"
             }
 
-            print now, number(total), number(idle), number(iowait), number(read), number(written), number(received), number(sent) > keep
+            # Each pool of PHP-FPM, summed up; its start times tell a restart,
+            # after which its counters start again from 0.
+            pools = 0
+            signature = ""
+            while ((getline row < fpm) > 0) {
+                started = json_number(row, "start time")
+                accepted_now = json_number(row, "accepted conn")
+                if (started == "" || accepted_now == "") { signature = signature "x;"; continue }
+                pools++
+                signature = signature started ";"
+                busy = json_number(row, "active processes") - 1
+                fpm_active += busy > 0 ? busy : 0
+                fpm_total += json_number(row, "total processes")
+                fpm_queue += json_number(row, "listen queue")
+                fpm_accepted += accepted_now
+                fpm_reached += json_number(row, "max children reached")
+                fpm_slow += json_number(row, "slow requests")
+            }
+            close(fpm)
+            same_pools = pools > 0 && (9 in then) && then[9] == signature
+
+            nginx_read = 0
+            while ((getline row < nginx) > 0) {
+                if (row ~ /^Active connections:/) {
+                    split(row, part, ":")
+                    connections = part[2] - 1
+                    nginx_read = 1
+                } else if (row ~ /^[ \t]*[0-9]+[ \t]+[0-9]+[ \t]+[0-9]+[ \t]*$/) {
+                    split(row, part, " ")
+                    nginx_requests = part[3]
+                }
+            }
+            close(nginx)
+            if (nginx_requests == "") nginx_read = 0
+
+            print now, number(total), number(idle), number(iowait), number(read), number(written), number(received), number(sent), \
+                (pools > 0 ? signature : "-"), (pools > 0 ? number(fpm_accepted) : "-"), (pools > 0 ? number(fpm_reached) : "-"), (pools > 0 ? number(fpm_slow) : "-"), \
+                (nginx_read ? number(nginx_requests) : "-") > keep
             printf "{\"uptime\":%s,\"cores\":%d,\"cpu\":%s,\"iowait\":%s,\"load1\":%s,\"load5\":%s,\"load15\":%s,", uptime, cores, cpu, wait, load1, load5, load15
             printf "\"memory_total\":%s,\"memory_available\":%s,\"swap_total\":%s,\"swap_free\":%s,", number(memory["MemTotal:"]), number(available), number(memory["SwapTotal:"]), number(memory["SwapFree:"])
             printf "\"disk_read\":%s,\"disk_write\":%s,\"network_in\":%s,\"network_out\":%s,", rate(read, then[5]), rate(written, then[6]), rate(received, then[7]), rate(sent, then[8])
             printf "\"machine_id\":%s,\"hostname\":%s,", (machine == "" ? "null" : text(machine)), (host == "" ? "null" : text(host))
+            if (pools > 0) {
+                printf "\"php_fpm\":{\"pools\":%d,\"active\":%s,\"total\":%s,\"queue\":%s,", pools, number(fpm_active), number(fpm_total), number(fpm_queue)
+                printf "\"requests\":%s,\"saturated\":%s,\"slow\":%s},", same_pools ? per_second(fpm_accepted, then[10]) : "null", same_pools ? since(fpm_reached, then[11]) : "null", same_pools ? since(fpm_slow, then[12]) : "null"
+            }
+            if (nginx_read) {
+                printf "\"nginx\":{\"connections\":%s,\"requests\":%s},", number(connections < 0 ? 0 : connections), per_second(nginx_requests, then[13])
+            }
             printf "\"disks\":[%s]}\n", disks
         }
     ' /proc/stat /proc/meminfo /proc/loadavg /proc/uptime /proc/net/dev /proc/diskstats > "$WORK/metrics.json" || return 1
     mv -f "$WORK/metrics.keep" "$WORK/metrics.last"
+}
+
+# Fetch one local status page into <file>, for at most 3 seconds and 64 KiB,
+# without the token. The file is empty when the page does not answer.
+fetch_status() {
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsS -m 3 --max-filesize 65536 -o "$2" "$1" 2>/dev/null
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q -T 3 -t 1 -O "$2" "$1" 2>/dev/null
+    else
+        false
+    fi || : > "$2"
+}
+
+# Read each PHP-FPM pool's status page into $WORK/fpm, one line a pool (an
+# empty one for a pool that did not answer), and nginx's into $WORK/nginx.
+read_status() {
+    : > "$WORK/fpm"
+    for status in $FPM_STATUS; do
+        case $status in *\?*) ;; *) status="$status?json" ;; esac
+        fetch_status "$status" "$WORK/status"
+        { tr -d '\r\n' < "$WORK/status"; printf '\n'; } >> "$WORK/fpm"
+    done
+    : > "$WORK/nginx"
+    [ -z "$NGINX_STATUS" ] || fetch_status "$NGINX_STATUS" "$WORK/nginx"
 }
 
 # ---------------------------------------------------------------- software
@@ -487,12 +584,21 @@ while [ $# -gt 0 ]; do
         --metrics) METRICS=1; shift ;;
         --errors) need_value "$1" $#; ERRORS=$2; shift 2 ;;
         --print-metrics) PRINT_METRICS=1; shift ;;
+        --fpm-status) need_value "$1" $#; FPM_STATUS="$FPM_STATUS $2"; shift 2 ;;
+        --nginx-status) need_value "$1" $#; NGINX_STATUS=$2; shift 2 ;;
         --backfill) BACKFILL=1; shift; break ;;
         --version) echo "edgelog-ship $VERSION"; exit 0 ;;
         -h|--help) usage 0 ;;
         *) say "unknown option: $1"; usage 2 ;;
     esac
 done
+
+if [ -n "$FPM_STATUS$NGINX_STATUS" ]; then
+    [ "$METRICS" -eq 1 ] || [ "$PRINT_METRICS" -eq 1 ] || die "--fpm-status and --nginx-status go with --metrics"
+    for status in $FPM_STATUS $NGINX_STATUS; do
+        case $status in http://?*|https://?*|file:///?*) ;; *) die "a status page is read over http:// or https://: $status" ;; esac
+    done
+fi
 
 if [ "$METRICS" -eq 1 ] || [ "$PRINT_METRICS" -eq 1 ]; then
     [ -r /proc/stat ] || die "--metrics reads /proc, which this system does not have"

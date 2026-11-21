@@ -12,8 +12,9 @@ use Illuminate\Support\Number;
 
 /**
  * What is wrong with each server right now, from its last sample: gone
- * quiet, busy, short of memory or of disk; and what runs on it: a system or
- * a branch no longer supported, known flaws an update fixes. Two queries
+ * quiet, busy, short of memory or of disk; from its last minutes: PHP-FPM
+ * full, requests waiting for a worker; and what runs on it: a system or a
+ * branch no longer supported, known flaws an update fixes. Three queries
  * for every server.
  */
 final class ServerAlerts
@@ -22,6 +23,11 @@ final class ServerAlerts
      * The minutes the processors are averaged over.
      */
     public const int CPU_MINUTES = 5;
+
+    /**
+     * The minutes PHP-FPM's pools are looked at over.
+     */
+    public const int FPM_MINUTES = 15;
 
     /**
      * A share of processors, memory or disk, in percent, from which it is worth a look, then a problem.
@@ -56,9 +62,19 @@ final class ServerAlerts
             ->whereNotNull('cpu')
             ->groupBy('server_id')
             ->pluck(DB::raw('avg(cpu)'), 'server_id');
+        $fpm = ServerMetricMinute::query()
+            ->whereIn('server_id', $ids)
+            ->where('minute', '>=', now()->subMinutes(self::FPM_MINUTES))
+            ->whereNotNull('fpm_active')
+            ->groupBy('server_id')
+            ->select('server_id')
+            ->selectRaw('sum(fpm_saturated) as saturated, max(fpm_queue) as queue')
+            ->get()
+            ->keyBy('server_id');
 
         return $servers->mapWithKeys(fn (Server $server) => [$server->id => SiteAlerts::worstFirst([
             ...self::alerts($latest->get($server->id), $cpu->has($server->id) ? (float) $cpu->get($server->id) : null),
+            ...self::fpmAlerts($fpm->get($server->id)),
             ...ServerSoftware::alerts($server->software),
         ])])->all();
     }
@@ -74,6 +90,32 @@ final class ServerAlerts
             $share >= self::WARN_SHARE => 'warn',
             default => null,
         };
+    }
+
+    /**
+     * PHP-FPM over its last minutes: it reached pm.max_children, or
+     * requests waited for a worker all the same.
+     *
+     * @return list<array{tone: string, label: string, detail: string}>
+     */
+    private static function fpmAlerts(?ServerMetricMinute $minutes): array
+    {
+        if ($minutes === null) {
+            return [];
+        }
+
+        $saturated = (int) $minutes->saturated;
+        $queue = (int) $minutes->queue;
+
+        if ($saturated > 0) {
+            return [SiteAlerts::alert('bad', __('PHP-FPM full'), trans_choice('pm.max_children reached :count time over the last :minutes minutes: requests waited for a worker. Raise it if memory allows.|pm.max_children reached :count times over the last :minutes minutes: requests waited for a worker. Raise it if memory allows.', $saturated, ['minutes' => self::FPM_MINUTES]))];
+        }
+
+        if ($queue > 0) {
+            return [SiteAlerts::alert('warn', __('Requests waiting for PHP'), trans_choice('Up to :count request waited for a free PHP-FPM worker over the last :minutes minutes.|Up to :count requests waited for a free PHP-FPM worker over the last :minutes minutes.', $queue, ['minutes' => self::FPM_MINUTES]))];
+        }
+
+        return [];
     }
 
     /**

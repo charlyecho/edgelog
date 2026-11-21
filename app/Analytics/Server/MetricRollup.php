@@ -15,7 +15,11 @@ use Illuminate\Support\Enumerable;
  * summed (again, in case a minute came in as it was) and at most as far back
  * as minutes are kept. Each hour keeps the average and the peak of the busy
  * share, the load and the memory in use, the peak of the swap, the average
- * bytes a second, and the disks as its last minute saw them.
+ * bytes a second, and the disks as its last minute saw them; PHP-FPM's busy
+ * workers (average and peak), its workers started and requests waiting at
+ * their peak, the times it reached pm.max_children and the slow requests
+ * summed up, nginx's connections (average and peak), and the requests a
+ * second of both.
  */
 final class MetricRollup
 {
@@ -78,6 +82,16 @@ final class MetricRollup
                 'network_in' => self::rate($minutes, 'network_in'),
                 'network_out' => self::rate($minutes, 'network_out'),
                 'disks' => $last->disks,
+                'fpm_active_average' => self::average($minutes, 'fpm_active'),
+                'fpm_active_peak' => self::peak($minutes, 'fpm_active'),
+                'fpm_total_peak' => self::peak($minutes, 'fpm_total'),
+                'fpm_queue_peak' => self::peak($minutes, 'fpm_queue'),
+                'fpm_requests' => self::average($minutes, 'fpm_requests', 2),
+                'fpm_saturated' => self::sum($minutes, 'fpm_saturated'),
+                'fpm_slow' => self::sum($minutes, 'fpm_slow'),
+                'nginx_connections_average' => self::average($minutes, 'nginx_connections'),
+                'nginx_connections_peak' => self::peak($minutes, 'nginx_connections'),
+                'nginx_requests' => self::average($minutes, 'nginx_requests', 2),
             ],
         );
     }
@@ -87,11 +101,33 @@ final class MetricRollup
      *
      * @param  Collection<int, ServerMetricMinute>  $minutes
      */
-    private static function average(Collection $minutes, string $key): ?float
+    private static function average(Collection $minutes, string $key, int $precision = 1): ?float
     {
         $known = $minutes->pluck($key)->filter(fn ($value) => $value !== null);
 
-        return $known->isEmpty() ? null : round($known->avg(), 1);
+        return $known->isEmpty() ? null : round($known->avg(), $precision);
+    }
+
+    /**
+     * The highest of the minutes that have the figure, or null when none has.
+     *
+     * @param  Collection<int, ServerMetricMinute>  $minutes
+     */
+    private static function peak(Collection $minutes, string $key): int|float|null
+    {
+        return $minutes->pluck($key)->filter(fn ($value) => $value !== null)->max();
+    }
+
+    /**
+     * The figure of the minutes that have it, added up, or null when none has.
+     *
+     * @param  Collection<int, ServerMetricMinute>  $minutes
+     */
+    private static function sum(Collection $minutes, string $key): ?int
+    {
+        $known = $minutes->pluck($key)->filter(fn ($value) => $value !== null);
+
+        return $known->isEmpty() ? null : (int) $known->sum();
     }
 
     /**

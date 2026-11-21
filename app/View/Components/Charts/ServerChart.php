@@ -31,7 +31,7 @@ class ServerChart extends Component
     /**
      * @param  list<array<string, mixed>>  $points  each with its start ('at') and the lines' keys
      * @param  list<array{key: string, label: string, color: string, dashed?: bool, area?: bool}>  $lines
-     * @param  'percent'|'load'|'bytes'  $unit
+     * @param  'percent'|'load'|'bytes'|'count'|'per_second'  $unit
      * @param  ?array{value: float, label: string}  $guide
      */
     public function __construct(
@@ -193,6 +193,8 @@ class ServerChart extends Component
             $value === null => '–',
             $this->unit === 'percent' => Number::format($value, maxPrecision: 1).'%',
             $this->unit === 'bytes' => __(':size/s', ['size' => Number::fileSize($value, maxPrecision: 1)]),
+            $this->unit === 'count' => Number::format($value, maxPrecision: 1),
+            $this->unit === 'per_second' => __(':count/s', ['count' => Number::format($value, maxPrecision: 2)]),
             default => Number::format($value, precision: 2),
         };
     }

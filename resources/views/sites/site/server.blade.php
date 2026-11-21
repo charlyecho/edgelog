@@ -5,7 +5,7 @@
 @endphp
 
 <x-section-frame section="site" :team="$team" :site="$site" current="server" :title="__('Server')"
-    :lede="__('The site\'s server, as edgelog-ship --metrics reads it from /proc and df once a minute: how busy its processors are, its memory, load, disks and network. Each minute is kept :minutes days, each hour\'s averages and peaks :hours days. Sites whose shippers run on the same machine share one server, and its figures are kept once.', ['minutes' => config('ingest.metrics_minute_days'), 'hours' => config('ingest.metrics_hour_days')])">
+    :lede="__('The site\'s server, as edgelog-ship --metrics reads it from /proc and df once a minute: how busy its processors are, its memory, load, disks and network, and PHP-FPM and nginx when it is given their status pages. Each minute is kept :minutes days, each hour\'s averages and peaks :hours days. Sites whose shippers run on the same machine share one server, and its figures are kept once.', ['minutes' => config('ingest.metrics_minute_days'), 'hours' => config('ingest.metrics_hour_days')])">
     @if ($hiddenServer)
         <x-card :title="__('No access to this server')">
             <p class="text-ink-2">{{ __('The site runs on a server you were not given access to. Ask an admin of the team to grant it to you.') }}</p>

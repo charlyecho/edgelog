@@ -521,4 +521,129 @@ class ServerMetricsTest extends TestCase
             ->assertSee('Runs on web-7, found from its shipper.')
             ->assertSee('A new server');
     }
+
+    /**
+     * PHP-FPM's pools and nginx, as the shipper adds them given their status pages.
+     *
+     * @param  array<string, mixed>  $fpm
+     * @param  array<string, mixed>  $nginx
+     * @return array<string, mixed>
+     */
+    private function webServer(array $fpm = [], array $nginx = []): array
+    {
+        return [
+            'php_fpm' => ['pools' => 1, 'active' => 3, 'total' => 50, 'queue' => 0, 'requests' => 4.25, 'saturated' => 0, 'slow' => 0, ...$fpm],
+            'nginx' => ['connections' => 16, 'requests' => 9.5, ...$nginx],
+        ];
+    }
+
+    public function test_php_fpm_and_nginx_are_kept_with_the_minute(): void
+    {
+        $this->send($this->sample($this->webServer(['saturated' => 2])))->assertOk();
+
+        $minute = $this->site->refresh()->server->metricMinutes()->sole();
+        $this->assertSame(3, $minute->fpm_active);
+        $this->assertSame(50, $minute->fpm_total);
+        $this->assertSame(4.25, $minute->fpm_requests);
+        $this->assertSame(2, $minute->fpm_saturated);
+        $this->assertSame(16, $minute->nginx_connections);
+        $this->assertSame(9.5, $minute->nginx_requests);
+    }
+
+    public function test_a_sample_without_them_leaves_those_another_shipper_sent_for_the_minute(): void
+    {
+        [$other, $otherToken] = $this->otherSite();
+        $machine = ['machine_id' => str_repeat('e5', 16)];
+        $this->send($this->sample([...$machine, ...$this->webServer()]))->assertOk();
+        $this->send($this->sample([...$machine, 'cpu' => 30]), $otherToken, $other)->assertOk();
+
+        $minute = Server::query()->sole()->metricMinutes()->sole();
+        $this->assertSame(30.0, $minute->cpu);
+        $this->assertSame(3, $minute->fpm_active);
+        $this->assertSame(16, $minute->nginx_connections);
+    }
+
+    public function test_php_fpm_figures_that_do_not_read_are_refused(): void
+    {
+        $this->send($this->sample(['php_fpm' => ['pools' => 1, 'active' => -1, 'total' => 50, 'queue' => 0, 'requests' => null, 'saturated' => null, 'slow' => null]]))->assertStatus(400);
+        $this->send($this->sample(['nginx' => ['connections' => 3]]))->assertStatus(400);
+    }
+
+    public function test_php_fpm_and_nginx_are_summed_up_by_the_hour(): void
+    {
+        foreach (['08:00' => [2, 0, 1], '08:01' => [8, 3, 2], '08:02' => [5, 0, null]] as $time => [$active, $queue, $saturated]) {
+            $this->server()->metricMinutes()->create(['minute' => "2026-10-23 {$time}:00", ...$this->sample(), 'fpm_active' => $active, 'fpm_total' => 20, 'fpm_queue' => $queue,
+                'fpm_requests' => 2.0, 'fpm_saturated' => $saturated, 'fpm_slow' => 0, 'nginx_connections' => $active * 2, 'nginx_requests' => 4.0]);
+        }
+
+        $this->travelTo('2026-10-23 09:02:00');
+        $this->artisan('edgelog:roll-metrics')->assertSuccessful();
+
+        $hour = $this->server()->metricHours()->sole();
+        $this->assertSame(5.0, $hour->fpm_active_average);
+        $this->assertSame(8, $hour->fpm_active_peak);
+        $this->assertSame(3, $hour->fpm_queue_peak);
+        $this->assertSame(3, $hour->fpm_saturated);
+        $this->assertSame(16, $hour->nginx_connections_peak);
+        $this->assertSame(4.0, $hour->nginx_requests);
+
+        $range = ServerRange::last($this->server(), '7d');
+        $this->assertSame(3, $range->total('fpm_saturated'));
+        $this->assertSame(8, $range->peak('fpm_active_peak'));
+    }
+
+    public function test_the_server_tab_shows_php_fpm_and_nginx_and_warns_when_the_pool_is_full(): void
+    {
+        $this->send($this->sample($this->webServer(['saturated' => 4, 'queue' => 6])))->assertOk();
+
+        $this->actingAs($this->viewer())
+            ->get(route('teams.sites.site.server', [$this->site->team, $this->site]))
+            ->assertOk()
+            ->assertSee('PHP workers busy')
+            ->assertSee('3 / 50')
+            ->assertSee('nginx connections')
+            ->assertSee('9.5/s')
+            ->assertDontSee('pm.status_path = /php-fpm-status');
+
+        $this->actingAs($this->viewer())
+            ->get(route('teams.servers.index', $this->site->team))
+            ->assertOk()
+            ->assertSee('PHP-FPM full');
+    }
+
+    public function test_the_server_tab_explains_how_to_read_php_fpm_and_nginx(): void
+    {
+        $this->send($this->sample())->assertOk();
+
+        $this->actingAs($this->viewer())
+            ->get(route('teams.sites.site.server', [$this->site->team, $this->site]))
+            ->assertOk()
+            ->assertSee('pm.status_path = /php-fpm-status')
+            ->assertSee('--fpm-status http://127.0.0.1:8081/php-fpm-status')
+            ->assertDontSee('PHP workers busy');
+    }
+
+    public function test_the_shipper_reads_the_status_pages_into_a_sample_the_endpoint_takes(): void
+    {
+        if (! is_readable('/proc/stat') || ! is_executable('/usr/bin/curl')) {
+            $this->markTestSkipped('No /proc or curl on this system.');
+        }
+
+        $folder = storage_path('framework/testing/status-'.uniqid());
+        mkdir($folder, 0777, true);
+        file_put_contents("{$folder}/fpm.json", '{"pool":"www","start time":1795278181,"accepted conn":2542,"listen queue":2,"max listen queue":5,"listen queue len":0,"idle processes":46,"active processes":4,"total processes":50,"max active processes":30,"max children reached":7,"slow requests":1}');
+        file_put_contents("{$folder}/nginx", "Active connections: 17 \nserver accepts handled requests\n 202964 202964 525532 \nReading: 0 Writing: 1 Waiting: 16 \n");
+
+        $result = Process::run(['sh', base_path('tools/edgelog-ship'), '--print-metrics', '--fpm-status', "file://{$folder}/fpm.json", '--nginx-status', "file://{$folder}/nginx"]);
+        array_map('unlink', glob("{$folder}/*"));
+        rmdir($folder);
+
+        $this->assertTrue($result->successful(), $result->errorOutput());
+        $sample = json_decode($result->output(), true);
+        $this->assertSame(['pools' => 1, 'active' => 3, 'total' => 50, 'queue' => 2, 'requests' => 0.0, 'saturated' => 0, 'slow' => 0], $sample['php_fpm'], 'the status request itself is not counted');
+        $this->assertSame(['connections' => 16, 'requests' => 0.0], $sample['nginx']);
+
+        $this->send($result->output())->assertOk();
+        $this->assertSame(3, $this->site->refresh()->server->metricMinutes()->sole()->fpm_active);
+    }
 }

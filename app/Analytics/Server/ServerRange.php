@@ -138,9 +138,10 @@ final class ServerRange
     /**
      * Each point of the range, oldest first: its start and, when a sample
      * fell in it, the averages and peaks (memory and swap as a share of
-     * theirs, in percent).
+     * theirs, in percent); the times PHP-FPM reached pm.max_children and its
+     * slow requests added up.
      *
-     * @return list<array{at: int, cpu: ?float, cpu_peak: ?float, iowait: ?float, load: ?float, load_peak: ?float, memory: ?float, memory_peak: ?float, swap: ?float, disk_read: ?int, disk_write: ?int, network_in: ?int, network_out: ?int}>
+     * @return list<array{at: int, cpu: ?float, cpu_peak: ?float, iowait: ?float, load: ?float, load_peak: ?float, memory: ?float, memory_peak: ?float, swap: ?float, disk_read: ?int, disk_write: ?int, network_in: ?int, network_out: ?int, fpm_active: ?float, fpm_active_peak: ?int, fpm_total: ?int, fpm_queue: ?int, fpm_requests: ?float, fpm_saturated: ?int, fpm_slow: ?int, nginx_connections: ?float, nginx_connections_peak: ?int, nginx_requests: ?float}>
      */
     public function points(): array
     {
@@ -170,6 +171,24 @@ final class ServerRange
         $known = array_filter(array_column($this->points(), $key), fn ($value) => $value !== null);
 
         return $known === [] ? null : array_sum($known) / count($known);
+    }
+
+    /**
+     * One figure added up over the range, or null when no point has it.
+     */
+    public function total(string $key): int|float|null
+    {
+        $known = array_filter(array_column($this->points(), $key), fn ($value) => $value !== null);
+
+        return $known === [] ? null : array_sum($known);
+    }
+
+    /**
+     * Determine if any point of the range has the figure.
+     */
+    public function has(string $key): bool
+    {
+        return $this->total($key) !== null;
     }
 
     /**
@@ -233,6 +252,16 @@ final class ServerRange
                 'disk_write' => $minute->disk_write,
                 'network_in' => $minute->network_in,
                 'network_out' => $minute->network_out,
+                'fpm_active' => $minute->fpm_active,
+                'fpm_active_peak' => $minute->fpm_active,
+                'fpm_total' => $minute->fpm_total,
+                'fpm_queue' => $minute->fpm_queue,
+                'fpm_requests' => $minute->fpm_requests,
+                'fpm_saturated' => $minute->fpm_saturated,
+                'fpm_slow' => $minute->fpm_slow,
+                'nginx_connections' => $minute->nginx_connections,
+                'nginx_connections_peak' => $minute->nginx_connections,
+                'nginx_requests' => $minute->nginx_requests,
             ]);
     }
 
@@ -262,6 +291,16 @@ final class ServerRange
                 'disk_write' => $hour->disk_write,
                 'network_in' => $hour->network_in,
                 'network_out' => $hour->network_out,
+                'fpm_active' => $hour->fpm_active_average,
+                'fpm_active_peak' => $hour->fpm_active_peak,
+                'fpm_total' => $hour->fpm_total_peak,
+                'fpm_queue' => $hour->fpm_queue_peak,
+                'fpm_requests' => $hour->fpm_requests,
+                'fpm_saturated' => $hour->fpm_saturated,
+                'fpm_slow' => $hour->fpm_slow,
+                'nginx_connections' => $hour->nginx_connections_average,
+                'nginx_connections_peak' => $hour->nginx_connections_peak,
+                'nginx_requests' => $hour->nginx_requests,
             ]);
     }
 
@@ -280,6 +319,11 @@ final class ServerRange
         };
         $peak = fn (string $key): int|float|null => $rows->pluck($key)->filter(fn ($value) => $value !== null)->max();
         $rate = fn (string $key): ?int => ($value = $average($key)) === null ? null : (int) round($value);
+        $sum = function (string $key) use ($rows): ?int {
+            $known = $rows->pluck($key)->filter(fn ($value) => $value !== null);
+
+            return $known->isEmpty() ? null : (int) $known->sum();
+        };
 
         return [
             'cpu' => $average('cpu'),
@@ -294,6 +338,16 @@ final class ServerRange
             'disk_write' => $rate('disk_write'),
             'network_in' => $rate('network_in'),
             'network_out' => $rate('network_out'),
+            'fpm_active' => $average('fpm_active'),
+            'fpm_active_peak' => $peak('fpm_active_peak'),
+            'fpm_total' => $peak('fpm_total'),
+            'fpm_queue' => $peak('fpm_queue'),
+            'fpm_requests' => $average('fpm_requests', 2),
+            'fpm_saturated' => $sum('fpm_saturated'),
+            'fpm_slow' => $sum('fpm_slow'),
+            'nginx_connections' => $average('nginx_connections'),
+            'nginx_connections_peak' => $peak('nginx_connections_peak'),
+            'nginx_requests' => $average('nginx_requests', 2),
         ];
     }
 
@@ -302,7 +356,8 @@ final class ServerRange
      */
     private static function emptyPoint(): array
     {
-        return array_fill_keys(['cpu', 'cpu_peak', 'iowait', 'load', 'load_peak', 'memory', 'memory_peak', 'swap', 'disk_read', 'disk_write', 'network_in', 'network_out'], null);
+        return array_fill_keys(['cpu', 'cpu_peak', 'iowait', 'load', 'load_peak', 'memory', 'memory_peak', 'swap', 'disk_read', 'disk_write', 'network_in', 'network_out',
+            'fpm_active', 'fpm_active_peak', 'fpm_total', 'fpm_queue', 'fpm_requests', 'fpm_saturated', 'fpm_slow', 'nginx_connections', 'nginx_connections_peak', 'nginx_requests'], null);
     }
 
     /**
