@@ -52,6 +52,11 @@ final class ServerRange
     private ?array $points = null;
 
     /**
+     * @var list<string>
+     */
+    private array $pools = [];
+
+    /**
      * @param  ?string  $range  the range picked on the server tab, if it was picked there
      */
     private function __construct(
@@ -139,7 +144,8 @@ final class ServerRange
      * Each point of the range, oldest first: its start and, when a sample
      * fell in it, the averages and peaks (memory and swap as a share of
      * theirs, in percent); the times PHP-FPM reached pm.max_children and its
-     * slow requests added up.
+     * slow requests added up; and the same for each pool told apart, under
+     * poolKey(), null where a pool sent nothing.
      *
      * @return list<array{at: int, cpu: ?float, cpu_peak: ?float, iowait: ?float, load: ?float, load_peak: ?float, memory: ?float, memory_peak: ?float, swap: ?float, disk_read: ?int, disk_write: ?int, network_in: ?int, network_out: ?int, fpm_active: ?float, fpm_active_peak: ?int, fpm_total: ?int, fpm_queue: ?int, fpm_requests: ?float, fpm_saturated: ?int, fpm_slow: ?int, nginx_connections: ?float, nginx_connections_peak: ?int, nginx_requests: ?float}>
      */
@@ -151,16 +157,38 @@ final class ServerRange
 
         $step = $this->step();
         $rows = $this->readsMinutes() ? $this->minuteRows() : $this->hourRows();
+        $this->pools = $rows->flatMap(fn (array $row) => array_keys($row['pools']))->unique()->sort()->values()->all();
         $from = $this->from->getTimestamp();
         $buckets = $rows->groupBy(fn (array $row) => $from + intdiv($row['at'] - $from, $step) * $step);
         $points = [];
 
         for ($at = $from; $at < $this->until->getTimestamp(); $at += $step) {
             $bucket = $buckets->get($at);
-            $points[] = ['at' => $at, ...($bucket === null ? self::emptyPoint() : self::point($bucket))];
+            $points[] = ['at' => $at, ...($bucket === null ? self::emptyPoint($this->pools) : self::point($bucket, $this->pools))];
         }
 
         return $this->points = $points;
+    }
+
+    /**
+     * The names of the PHP-FPM pools told apart in the range, in order.
+     *
+     * @return list<string>
+     */
+    public function pools(): array
+    {
+        $this->points();
+
+        return $this->pools;
+    }
+
+    /**
+     * The key of one pool's figure in the points: active, active_peak,
+     * total, queue, requests or saturated.
+     */
+    public static function poolKey(string $figure, string $pool): string
+    {
+        return "pool_{$figure}:{$pool}";
     }
 
     /**
@@ -262,6 +290,14 @@ final class ServerRange
                 'nginx_connections' => $minute->nginx_connections,
                 'nginx_connections_peak' => $minute->nginx_connections,
                 'nginx_requests' => $minute->nginx_requests,
+                'pools' => collect($minute->fpm_pools ?? [])->map(fn (array $pool) => [
+                    'active' => $pool['active'],
+                    'active_peak' => $pool['active'],
+                    'total' => $pool['total'],
+                    'queue' => $pool['queue'],
+                    'requests' => $pool['requests'],
+                    'saturated' => $pool['saturated'],
+                ])->all(),
             ]);
     }
 
@@ -301,16 +337,25 @@ final class ServerRange
                 'nginx_connections' => $hour->nginx_connections_average,
                 'nginx_connections_peak' => $hour->nginx_connections_peak,
                 'nginx_requests' => $hour->nginx_requests,
+                'pools' => collect($hour->fpm_pools ?? [])->map(fn (array $pool) => [
+                    'active' => $pool['active_average'],
+                    'active_peak' => $pool['active_peak'],
+                    'total' => $pool['total_peak'],
+                    'queue' => $pool['queue_peak'],
+                    'requests' => $pool['requests'],
+                    'saturated' => $pool['saturated'],
+                ])->all(),
             ]);
     }
 
     /**
-     * One point from the samples that fell in it.
+     * One point from the samples that fell in it, with each pool's figures.
      *
      * @param  Collection<int, array<string, mixed>>  $rows
+     * @param  list<string>  $pools
      * @return array<string, int|float|null>
      */
-    private static function point(Collection $rows): array
+    private static function point(Collection $rows, array $pools): array
     {
         $average = function (string $key, int $precision = 1) use ($rows): ?float {
             $known = $rows->pluck($key)->filter(fn ($value) => $value !== null);
@@ -325,7 +370,21 @@ final class ServerRange
             return $known->isEmpty() ? null : (int) $known->sum();
         };
 
+        $byPool = [];
+
+        foreach ($pools as $pool) {
+            $samples = $rows->map(fn (array $row) => $row['pools'][$pool] ?? null)->filter();
+            $known = fn (string $figure) => $samples->pluck($figure)->filter(fn ($value) => $value !== null);
+            $byPool[self::poolKey('active', $pool)] = $known('active')->isEmpty() ? null : round($known('active')->avg(), 1);
+            $byPool[self::poolKey('active_peak', $pool)] = $known('active_peak')->max();
+            $byPool[self::poolKey('total', $pool)] = $known('total')->max();
+            $byPool[self::poolKey('queue', $pool)] = $known('queue')->max();
+            $byPool[self::poolKey('requests', $pool)] = $known('requests')->isEmpty() ? null : round($known('requests')->avg(), 2);
+            $byPool[self::poolKey('saturated', $pool)] = $known('saturated')->isEmpty() ? null : (int) $known('saturated')->sum();
+        }
+
         return [
+            ...$byPool,
             'cpu' => $average('cpu'),
             'cpu_peak' => $peak('cpu_peak'),
             'iowait' => $average('iowait'),
@@ -352,11 +411,16 @@ final class ServerRange
     }
 
     /**
+     * @param  list<string>  $pools
      * @return array<string, null>
      */
-    private static function emptyPoint(): array
+    private static function emptyPoint(array $pools): array
     {
-        return array_fill_keys(['cpu', 'cpu_peak', 'iowait', 'load', 'load_peak', 'memory', 'memory_peak', 'swap', 'disk_read', 'disk_write', 'network_in', 'network_out',
+        $byPool = collect($pools)->crossJoin(['active', 'active_peak', 'total', 'queue', 'requests', 'saturated'])
+            ->mapWithKeys(fn (array $pair) => [self::poolKey($pair[1], $pair[0]) => null])
+            ->all();
+
+        return $byPool + array_fill_keys(['cpu', 'cpu_peak', 'iowait', 'load', 'load_peak', 'memory', 'memory_peak', 'swap', 'disk_read', 'disk_write', 'network_in', 'network_out',
             'fpm_active', 'fpm_active_peak', 'fpm_total', 'fpm_queue', 'fpm_requests', 'fpm_saturated', 'fpm_slow', 'nginx_connections', 'nginx_connections_peak', 'nginx_requests'], null);
     }
 

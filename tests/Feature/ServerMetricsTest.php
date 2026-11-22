@@ -611,6 +611,105 @@ class ServerMetricsTest extends TestCase
             ->assertSee('PHP-FPM full');
     }
 
+    public function test_the_shipper_tells_each_pool_apart_by_its_name(): void
+    {
+        if (! is_readable('/proc/stat') || ! is_executable('/usr/bin/curl')) {
+            $this->markTestSkipped('No /proc or curl on this system.');
+        }
+
+        $folder = storage_path('framework/testing/status-'.uniqid());
+        mkdir($folder, 0777, true);
+        file_put_contents("{$folder}/www.json", '{"pool":"www","start time":1795278181,"accepted conn":2542,"listen queue":0,"active processes":2,"total processes":4,"max children reached":0,"slow requests":0}');
+        file_put_contents("{$folder}/music.json", '{"pool":"music stream","start time":1795278100,"accepted conn":10,"listen queue":1,"active processes":6,"total processes":6,"max children reached":3,"slow requests":0}');
+
+        $result = Process::run(['sh', base_path('tools/edgelog-ship'), '--print-metrics', '--fpm-status', "file://{$folder}/www.json", '--fpm-status', "file://{$folder}/music.json"]);
+        array_map('unlink', glob("{$folder}/*"));
+        rmdir($folder);
+
+        $this->assertTrue($result->successful(), $result->errorOutput());
+        $fpm = json_decode($result->output(), true)['php_fpm'];
+        $this->assertSame(2, $fpm['pools']);
+        $this->assertSame(6, $fpm['active']);
+        $this->assertSame([
+            ['name' => 'www', 'active' => 1, 'total' => 4, 'queue' => 0, 'requests' => 0.0, 'saturated' => 0],
+            ['name' => 'musicstream', 'active' => 5, 'total' => 6, 'queue' => 1, 'requests' => 0.0, 'saturated' => 0],
+        ], $fpm['by_pool'], 'a name keeps only what is safe to send');
+    }
+
+    public function test_each_pool_is_kept_with_the_minute_and_summed_up_by_the_hour(): void
+    {
+        $byPool = fn (int $www, int $music, ?int $saturated) => ['by_pool' => [
+            ['name' => 'www', 'active' => $www, 'total' => 4, 'queue' => 0, 'requests' => 1.5, 'saturated' => 0],
+            ['name' => 'music', 'active' => $music, 'total' => 6, 'queue' => 2, 'requests' => 0.5, 'saturated' => $saturated],
+        ]];
+
+        $this->travelTo('2026-10-23 08:00:10');
+        $this->send($this->sample($this->webServer($byPool(1, 6, null))))->assertOk();
+        $this->travelTo('2026-10-23 08:01:10');
+        $this->send($this->sample($this->webServer($byPool(3, 2, 4))))->assertOk();
+        $this->site->refresh();
+
+        $minute = $this->server()->metricMinutes()->latest('minute')->first();
+        $this->assertSame(['active' => 2, 'total' => 6, 'queue' => 2, 'requests' => 0.5, 'saturated' => 4], $minute->fpm_pools['music']);
+
+        $range = ServerRange::last($this->server(), '6h');
+        $this->assertSame(['music', 'www'], $range->pools());
+        $this->assertSame(6, $range->peak(ServerRange::poolKey('active_peak', 'music')));
+        $this->assertSame(4, $range->total(ServerRange::poolKey('saturated', 'music')));
+
+        $this->travelTo('2026-10-23 09:02:00');
+        $this->artisan('edgelog:roll-metrics')->assertSuccessful();
+
+        $hour = $this->server()->metricHours()->sole();
+        $this->assertEquals(['active_average' => 4.0, 'active_peak' => 6, 'total_peak' => 6, 'queue_peak' => 2, 'requests' => 0.5, 'saturated' => 4], $hour->fpm_pools['music']);
+        $this->assertEquals(2.0, $hour->fpm_pools['www']['active_average'], 'a JSON column keeps 2.0 as 2');
+
+        $range = ServerRange::last($this->server(), '7d');
+        $this->assertSame(['music', 'www'], $range->pools());
+        $this->assertSame(6, $range->peak(ServerRange::poolKey('active_peak', 'music')));
+    }
+
+    public function test_pool_names_that_do_not_read_are_refused(): void
+    {
+        $pool = ['active' => 1, 'total' => 2, 'queue' => 0, 'requests' => null, 'saturated' => null];
+
+        $this->send($this->sample($this->webServer(['by_pool' => [['name' => 'www pool', ...$pool]]])))->assertStatus(400);
+        $this->send($this->sample($this->webServer(['by_pool' => [['name' => 'www', ...$pool], ['name' => 'www', ...$pool]]])))->assertStatus(400);
+    }
+
+    public function test_the_server_tab_draws_a_line_by_pool_and_names_the_full_one(): void
+    {
+        $this->send($this->sample($this->webServer(['saturated' => 3, 'by_pool' => [
+            ['name' => 'cloud', 'active' => 1, 'total' => 4, 'queue' => 0, 'requests' => 1.5, 'saturated' => 0],
+            ['name' => 'music', 'active' => 2, 'total' => 2, 'queue' => 0, 'requests' => 0.5, 'saturated' => 3],
+        ]])))->assertOk();
+
+        $this->actingAs($this->viewer())
+            ->get(route('teams.sites.site.server', [$this->site->team, $this->site]))
+            ->assertOk()
+            ->assertSee('PHP workers busy by pool')
+            ->assertSee('PHP requests a second by pool')
+            ->assertSeeInOrder(['cloud', 'music']);
+
+        $this->actingAs($this->viewer())
+            ->get(route('teams.servers.index', $this->site->team))
+            ->assertOk()
+            ->assertSee('PHP-FPM full (music)');
+    }
+
+    public function test_a_single_pool_draws_no_chart_by_pool(): void
+    {
+        $this->send($this->sample($this->webServer(['by_pool' => [
+            ['name' => 'www', 'active' => 3, 'total' => 50, 'queue' => 0, 'requests' => 4.25, 'saturated' => 0],
+        ]])))->assertOk();
+
+        $this->actingAs($this->viewer())
+            ->get(route('teams.sites.site.server', [$this->site->team, $this->site]))
+            ->assertOk()
+            ->assertSee('PHP workers busy')
+            ->assertDontSee('by pool');
+    }
+
     public function test_the_server_tab_explains_how_to_read_php_fpm_and_nginx(): void
     {
         $this->send($this->sample())->assertOk();
@@ -640,7 +739,8 @@ class ServerMetricsTest extends TestCase
 
         $this->assertTrue($result->successful(), $result->errorOutput());
         $sample = json_decode($result->output(), true);
-        $this->assertSame(['pools' => 1, 'active' => 3, 'total' => 50, 'queue' => 2, 'requests' => 0.0, 'saturated' => 0, 'slow' => 0], $sample['php_fpm'], 'the status request itself is not counted');
+        $this->assertSame(['pools' => 1, 'active' => 3, 'total' => 50, 'queue' => 2, 'requests' => 0.0, 'saturated' => 0, 'slow' => 0,
+            'by_pool' => [['name' => 'www', 'active' => 3, 'total' => 50, 'queue' => 2, 'requests' => 0.0, 'saturated' => 0]]], $sample['php_fpm'], 'the status request itself is not counted');
         $this->assertSame(['connections' => 16, 'requests' => 0.0], $sample['nginx']);
 
         $this->send($result->output())->assertOk();

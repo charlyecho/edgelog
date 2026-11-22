@@ -15,8 +15,9 @@ use Illuminate\Support\Facades\Validator;
  * older than them sends neither. Once an hour, a sample also says what runs
  * on the machine (null in the others, and from a shipper older than 1.4.0).
  * A shipper given their status pages (1.5.0) adds PHP-FPM's pools, summed
- * up, and nginx; a sample without them leaves those of its minute as they
- * are, sent by another site's shipper on the same machine.
+ * up, and nginx; from 1.6.0, each pool on its own too, by its name. A sample
+ * without them leaves those of its minute as they are, sent by another
+ * site's shipper on the same machine.
  */
 final readonly class ServerSample
 {
@@ -31,7 +32,12 @@ final readonly class ServerSample
     public const int MAX_PROGRAMS = 64;
 
     /**
-     * @param  array<string, int|float|null>  $figures
+     * The most PHP-FPM pools one sample may tell apart.
+     */
+    public const int MAX_POOLS = 16;
+
+    /**
+     * @param  array<string, int|float|array<string, array{active: int, total: int, queue: int, requests: ?float, saturated: ?int}>|null>  $figures  fpm_pools by pool name
      * @param  list<array{mount: string, size: int, used: int, free: int}>  $disks
      * @param  ?array<string, mixed>  $software  what runs on the machine, as ServerSoftware::reported() keeps it
      */
@@ -148,6 +154,13 @@ final readonly class ServerSample
                 'php_fpm.requests' => $perSecond,
                 'php_fpm.saturated' => $sinceBefore,
                 'php_fpm.slow' => $sinceBefore,
+                'php_fpm.by_pool' => ['sometimes', 'array', 'list', 'max:'.self::MAX_POOLS],
+                'php_fpm.by_pool.*.name' => ['required', 'string', 'distinct', 'regex:/^[A-Za-z0-9_.-]{1,32}$/'],
+                'php_fpm.by_pool.*.active' => $count,
+                'php_fpm.by_pool.*.total' => $count,
+                'php_fpm.by_pool.*.queue' => $count,
+                'php_fpm.by_pool.*.requests' => $perSecond,
+                'php_fpm.by_pool.*.saturated' => $sinceBefore,
             ];
         }
 
@@ -168,7 +181,7 @@ final readonly class ServerSample
      * only those the sample has.
      *
      * @param  array<string, mixed>  $valid
-     * @return array<string, int|float|null>
+     * @return array<string, int|float|array<string, array{active: int, total: int, queue: int, requests: ?float, saturated: ?int}>|null>
      */
     private static function webServerFigures(array $valid): array
     {
@@ -184,6 +197,16 @@ final readonly class ServerSample
                 'fpm_saturated' => $fpm['saturated'] === null ? null : (int) $fpm['saturated'],
                 'fpm_slow' => $fpm['slow'] === null ? null : (int) $fpm['slow'],
             ];
+
+            if (isset($fpm['by_pool'])) {
+                $figures['fpm_pools'] = collect($fpm['by_pool'])->mapWithKeys(fn (array $pool) => [$pool['name'] => [
+                    'active' => (int) $pool['active'],
+                    'total' => (int) $pool['total'],
+                    'queue' => (int) $pool['queue'],
+                    'requests' => $pool['requests'] === null ? null : (float) $pool['requests'],
+                    'saturated' => $pool['saturated'] === null ? null : (int) $pool['saturated'],
+                ]])->all();
+            }
         }
 
         if (isset($valid['nginx'])) {

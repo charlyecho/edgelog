@@ -91,7 +91,10 @@
 # The pools are summed up: the workers busy and started, the requests waiting
 # for one, the requests a second, and how many times pm.max_children was
 # reached and requests were slow (request_slowlog_timeout) since the sample
-# before; nginx's open connections and requests a second. The status request
+# before; nginx's open connections and requests a second. Each pool is also
+# sent on its own, by its name (1.6.0): its workers busy and started, the
+# requests waiting, its requests a second and the times it reached
+# pm.max_children. The status request
 # itself is not counted. A page that does not answer in 3 seconds is left out
 # of the sample, never sent the token.
 #
@@ -101,7 +104,7 @@
 
 set -u
 
-VERSION=1.5.0
+VERSION=1.6.0
 MAX_BATCH_BYTES=4194304
 MAX_LINE=65536
 MAX_RETRY_AFTER=600
@@ -186,6 +189,14 @@ read_metrics() {
             sub(/^[ \t]+/, "", rest)
             return match(rest, /^[0-9]+/) ? substr(rest, 1, RLENGTH) : ""
         }
+        # A string of a JSON object on one line, by its key, without escapes; empty when it has none.
+        function json_text(json, key,    at, rest) {
+            at = index(json, "\"" key "\":")
+            if (at == 0) return ""
+            rest = substr(json, at + length(key) + 3)
+            sub(/^[ \t]+/, "", rest)
+            return match(rest, /^"[^"\\]*"/) ? substr(rest, 2, RLENGTH - 2) : ""
+        }
         function rate(now_value, then_value) {
             return (elapsed > 0 && now_value >= then_value) ? number((now_value - then_value) / elapsed) : "null"
         }
@@ -242,10 +253,23 @@ read_metrics() {
                 disks = disks (count++ ? "," : "") "{\"mount\":" text(mount) ",\"size\":" number(field[2] * 1024) ",\"used\":" number(field[3] * 1024) ",\"free\":" number(field[4] * 1024) "}"
             }
 
-            # Each pool of PHP-FPM, summed up; its start times tell a restart,
-            # after which its counters start again from 0.
+            # Each pool of PHP-FPM, summed up and on its own; its start times
+            # tell a restart, after which its counters start again from 0.
+            # The counters of each pool are kept as name|start|accepted|reached;...
+            if (14 in then && then[14] != "-") {
+                split(then[14], entries, ";")
+                for (i in entries) {
+                    if (split(entries[i], kept, "|") == 4) {
+                        pool_then_start[kept[1]] = kept[2]
+                        pool_then_accepted[kept[1]] = kept[3]
+                        pool_then_reached[kept[1]] = kept[4]
+                    }
+                }
+            }
             pools = 0
             signature = ""
+            by_pool = ""
+            pool_counters = ""
             while ((getline row < fpm) > 0) {
                 started = json_number(row, "start time")
                 accepted_now = json_number(row, "accepted conn")
@@ -253,12 +277,25 @@ read_metrics() {
                 pools++
                 signature = signature started ";"
                 busy = json_number(row, "active processes") - 1
-                fpm_active += busy > 0 ? busy : 0
+                busy = busy > 0 ? busy : 0
+                reached_now = json_number(row, "max children reached") + 0
+                fpm_active += busy
                 fpm_total += json_number(row, "total processes")
                 fpm_queue += json_number(row, "listen queue")
                 fpm_accepted += accepted_now
-                fpm_reached += json_number(row, "max children reached")
+                fpm_reached += reached_now
                 fpm_slow += json_number(row, "slow requests")
+
+                name = json_text(row, "pool")
+                gsub(/[^A-Za-z0-9_.-]/, "", name)
+                name = substr(name, 1, 32)
+                if (name == "") name = "pool" pools
+                same_pool = (name in pool_then_start) && pool_then_start[name] == started
+                if (pools <= 16) {
+                    by_pool = by_pool (pools > 1 ? "," : "") "{\"name\":" text(name) ",\"active\":" number(busy) ",\"total\":" number(json_number(row, "total processes")) ",\"queue\":" number(json_number(row, "listen queue"))
+                    by_pool = by_pool ",\"requests\":" (same_pool ? per_second(accepted_now, pool_then_accepted[name]) : "null") ",\"saturated\":" (same_pool ? since(reached_now, pool_then_reached[name]) : "null") "}"
+                }
+                pool_counters = pool_counters (pools > 1 ? ";" : "") name "|" started "|" accepted_now "|" reached_now
             }
             close(fpm)
             same_pools = pools > 0 && (9 in then) && then[9] == signature
@@ -279,14 +316,14 @@ read_metrics() {
 
             print now, number(total), number(idle), number(iowait), number(read), number(written), number(received), number(sent), \
                 (pools > 0 ? signature : "-"), (pools > 0 ? number(fpm_accepted) : "-"), (pools > 0 ? number(fpm_reached) : "-"), (pools > 0 ? number(fpm_slow) : "-"), \
-                (nginx_read ? number(nginx_requests) : "-") > keep
+                (nginx_read ? number(nginx_requests) : "-"), (pools > 0 ? pool_counters : "-") > keep
             printf "{\"uptime\":%s,\"cores\":%d,\"cpu\":%s,\"iowait\":%s,\"load1\":%s,\"load5\":%s,\"load15\":%s,", uptime, cores, cpu, wait, load1, load5, load15
             printf "\"memory_total\":%s,\"memory_available\":%s,\"swap_total\":%s,\"swap_free\":%s,", number(memory["MemTotal:"]), number(available), number(memory["SwapTotal:"]), number(memory["SwapFree:"])
             printf "\"disk_read\":%s,\"disk_write\":%s,\"network_in\":%s,\"network_out\":%s,", rate(read, then[5]), rate(written, then[6]), rate(received, then[7]), rate(sent, then[8])
             printf "\"machine_id\":%s,\"hostname\":%s,", (machine == "" ? "null" : text(machine)), (host == "" ? "null" : text(host))
             if (pools > 0) {
                 printf "\"php_fpm\":{\"pools\":%d,\"active\":%s,\"total\":%s,\"queue\":%s,", pools, number(fpm_active), number(fpm_total), number(fpm_queue)
-                printf "\"requests\":%s,\"saturated\":%s,\"slow\":%s},", same_pools ? per_second(fpm_accepted, then[10]) : "null", same_pools ? since(fpm_reached, then[11]) : "null", same_pools ? since(fpm_slow, then[12]) : "null"
+                printf "\"requests\":%s,\"saturated\":%s,\"slow\":%s,\"by_pool\":[%s]},", same_pools ? per_second(fpm_accepted, then[10]) : "null", same_pools ? since(fpm_reached, then[11]) : "null", same_pools ? since(fpm_slow, then[12]) : "null", by_pool
             }
             if (nginx_read) {
                 printf "\"nginx\":{\"connections\":%s,\"requests\":%s},", number(connections < 0 ? 0 : connections), per_second(nginx_requests, then[13])

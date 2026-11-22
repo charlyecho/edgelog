@@ -25,6 +25,7 @@ class ServerMetricHour extends Model
         return [
             'hour' => 'immutable_datetime',
             'disks' => 'array',
+            'fpm_pools' => 'array',
         ];
     }
 

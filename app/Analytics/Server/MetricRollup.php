@@ -19,7 +19,7 @@ use Illuminate\Support\Enumerable;
  * workers (average and peak), its workers started and requests waiting at
  * their peak, the times it reached pm.max_children and the slow requests
  * summed up, nginx's connections (average and peak), and the requests a
- * second of both.
+ * second of both; the same for each PHP-FPM pool its shipper tells apart.
  */
 final class MetricRollup
 {
@@ -92,14 +92,45 @@ final class MetricRollup
                 'nginx_connections_average' => self::average($minutes, 'nginx_connections'),
                 'nginx_connections_peak' => self::peak($minutes, 'nginx_connections'),
                 'nginx_requests' => self::average($minutes, 'nginx_requests', 2),
+                'fpm_pools' => self::pools($minutes),
             ],
         );
     }
 
     /**
-     * The average of the minutes that have the figure, or null when none has.
+     * Each PHP-FPM pool over the hour, by its name, from the minutes that
+     * tell it apart: its busy workers (average and peak), its workers
+     * started and requests waiting at their peak, its requests a second on
+     * average and the times it reached pm.max_children; null when no minute
+     * told the pools apart.
      *
      * @param  Collection<int, ServerMetricMinute>  $minutes
+     * @return ?array<string, array{active_average: ?float, active_peak: ?int, total_peak: ?int, queue_peak: ?int, requests: ?float, saturated: ?int}>
+     */
+    private static function pools(Collection $minutes): ?array
+    {
+        $byPool = $minutes
+            ->flatMap(fn (ServerMetricMinute $minute) => collect($minute->fpm_pools ?? [])->map(fn (array $pool, string $name) => [...$pool, 'name' => $name])->values())
+            ->groupBy('name');
+
+        if ($byPool->isEmpty()) {
+            return null;
+        }
+
+        return $byPool->sortKeys()->map(fn (Collection $samples) => [
+            'active_average' => self::average($samples, 'active'),
+            'active_peak' => self::peak($samples, 'active'),
+            'total_peak' => self::peak($samples, 'total'),
+            'queue_peak' => self::peak($samples, 'queue'),
+            'requests' => self::average($samples, 'requests', 2),
+            'saturated' => self::sum($samples, 'saturated'),
+        ])->all();
+    }
+
+    /**
+     * The average of the minutes that have the figure, or null when none has.
+     *
+     * @param  Collection<int, ServerMetricMinute|array<string, mixed>>  $minutes  minutes, or one pool's figures in them
      */
     private static function average(Collection $minutes, string $key, int $precision = 1): ?float
     {
@@ -111,7 +142,7 @@ final class MetricRollup
     /**
      * The highest of the minutes that have the figure, or null when none has.
      *
-     * @param  Collection<int, ServerMetricMinute>  $minutes
+     * @param  Collection<int, ServerMetricMinute|array<string, mixed>>  $minutes
      */
     private static function peak(Collection $minutes, string $key): int|float|null
     {
@@ -121,7 +152,7 @@ final class MetricRollup
     /**
      * The figure of the minutes that have it, added up, or null when none has.
      *
-     * @param  Collection<int, ServerMetricMinute>  $minutes
+     * @param  Collection<int, ServerMetricMinute|array<string, mixed>>  $minutes
      */
     private static function sum(Collection $minutes, string $key): ?int
     {

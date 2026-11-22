@@ -1,6 +1,7 @@
 @props(['range', 'timezone'])
 
 @php
+    use App\Analytics\Server\ServerRange;
     use App\Ingest\ShipperSetup;
     use Illuminate\Support\Number;
 
@@ -16,6 +17,14 @@
     $queuePeak = $range->peak('fpm_queue');
     $saturated = $range->total('fpm_saturated');
     $slow = $range->total('fpm_slow');
+    $pools = $range->pools();
+    $poolColors = ['var(--group-people)', 'var(--group-answer_engines)', 'var(--group-search_engines)', 'var(--group-bots)', 'var(--series-revenue)', 'var(--series-pages)', 'var(--group-ours)'];
+    $poolLines = fn (string $figure) => array_map(fn (string $pool, int $index) => [
+        'key' => ServerRange::poolKey($figure, $pool),
+        'label' => $pool,
+        'color' => $poolColors[$index % count($poolColors)],
+        'dashed' => $index >= count($poolColors),
+    ], $pools, array_keys($pools));
 @endphp
 
 {{-- PHP-FPM's pools and nginx over the range picked, from their status pages; how to read them while they are not. --}}
@@ -47,6 +56,12 @@
                 $withPeaks ? ['key' => 'fpm_active_peak', 'label' => __('Busy, peak'), 'color' => $first, 'dashed' => true] : null,
                 ['key' => 'fpm_total', 'label' => __('Started'), 'color' => $second],
             ]))" />
+
+            @if (count($pools) > 1)
+                <x-charts.server-chart :title="$withPeaks ? __('PHP workers busy by pool, average') : __('PHP workers busy by pool')" :points="$points" unit="count" :step="$range->step()" :timezone="$timezone" :lines="$poolLines('active')" />
+
+                <x-charts.server-chart :title="__('PHP requests a second by pool')" :points="$points" unit="per_second" :step="$range->step()" :timezone="$timezone" :lines="$poolLines('requests')" />
+            @endif
 
             <x-charts.server-chart :title="__('Waiting for PHP')" :points="$points" unit="count" :step="$range->step()" :timezone="$timezone" :lines="[
                 ['key' => 'fpm_queue', 'label' => __('Requests waiting, peak'), 'color' => $first, 'area' => true],

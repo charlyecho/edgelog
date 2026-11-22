@@ -26,6 +26,7 @@ class ServerMetricMinute extends Model
         return [
             'minute' => 'immutable_datetime',
             'disks' => 'array',
+            'fpm_pools' => 'array',
         ];
     }
 

@@ -15,7 +15,7 @@ use Illuminate\Support\Number;
  * quiet, busy, short of memory or of disk; from its last minutes: PHP-FPM
  * full, requests waiting for a worker; and what runs on it: a system or a
  * branch no longer supported, known flaws an update fixes. Three queries
- * for every server.
+ * for every server, a fourth to name the pools when PHP-FPM is in trouble.
  */
 final class ServerAlerts
 {
@@ -71,10 +71,17 @@ final class ServerAlerts
             ->selectRaw('sum(fpm_saturated) as saturated, max(fpm_queue) as queue')
             ->get()
             ->keyBy('server_id');
+        $troubled = $fpm->filter(fn (ServerMetricMinute $minutes) => $minutes->saturated > 0 || $minutes->queue > 0)->keys();
+        $pools = $troubled->isEmpty() ? collect() : ServerMetricMinute::query()
+            ->whereIn('server_id', $troubled)
+            ->where('minute', '>=', now()->subMinutes(self::FPM_MINUTES))
+            ->whereNotNull('fpm_pools')
+            ->get(['server_id', 'fpm_pools'])
+            ->groupBy('server_id');
 
         return $servers->mapWithKeys(fn (Server $server) => [$server->id => SiteAlerts::worstFirst([
             ...self::alerts($latest->get($server->id), $cpu->has($server->id) ? (float) $cpu->get($server->id) : null),
-            ...self::fpmAlerts($fpm->get($server->id)),
+            ...self::fpmAlerts($fpm->get($server->id), $pools->get($server->id, collect())),
             ...ServerSoftware::alerts($server->software),
         ])])->all();
     }
@@ -94,11 +101,13 @@ final class ServerAlerts
 
     /**
      * PHP-FPM over its last minutes: it reached pm.max_children, or
-     * requests waited for a worker all the same.
+     * requests waited for a worker all the same; named after the pools
+     * where it happened, when the shipper tells them apart.
      *
+     * @param  Collection<int, ServerMetricMinute>  $poolMinutes  the minutes that tell the pools apart
      * @return list<array{tone: string, label: string, detail: string}>
      */
-    private static function fpmAlerts(?ServerMetricMinute $minutes): array
+    private static function fpmAlerts(?ServerMetricMinute $minutes, Collection $poolMinutes): array
     {
         if ($minutes === null) {
             return [];
@@ -106,13 +115,22 @@ final class ServerAlerts
 
         $saturated = (int) $minutes->saturated;
         $queue = (int) $minutes->queue;
+        $where = function (string $figure) use ($poolMinutes): string {
+            $names = $poolMinutes
+                ->flatMap(fn (ServerMetricMinute $minute) => collect($minute->fpm_pools)->filter(fn (array $pool) => ($pool[$figure] ?? 0) > 0)->keys())
+                ->unique()
+                ->sort()
+                ->values();
+
+            return $names->isEmpty() ? '' : ' ('.$names->implode(', ').')';
+        };
 
         if ($saturated > 0) {
-            return [SiteAlerts::alert('bad', __('PHP-FPM full'), trans_choice('pm.max_children reached :count time over the last :minutes minutes: requests waited for a worker. Raise it if memory allows.|pm.max_children reached :count times over the last :minutes minutes: requests waited for a worker. Raise it if memory allows.', $saturated, ['minutes' => self::FPM_MINUTES]))];
+            return [SiteAlerts::alert('bad', __('PHP-FPM full').$where('saturated'), trans_choice('pm.max_children reached :count time over the last :minutes minutes: requests waited for a worker. Raise it if memory allows.|pm.max_children reached :count times over the last :minutes minutes: requests waited for a worker. Raise it if memory allows.', $saturated, ['minutes' => self::FPM_MINUTES]))];
         }
 
         if ($queue > 0) {
-            return [SiteAlerts::alert('warn', __('Requests waiting for PHP'), trans_choice('Up to :count request waited for a free PHP-FPM worker over the last :minutes minutes.|Up to :count requests waited for a free PHP-FPM worker over the last :minutes minutes.', $queue, ['minutes' => self::FPM_MINUTES]))];
+            return [SiteAlerts::alert('warn', __('Requests waiting for PHP').$where('queue'), trans_choice('Up to :count request waited for a free PHP-FPM worker over the last :minutes minutes.|Up to :count requests waited for a free PHP-FPM worker over the last :minutes minutes.', $queue, ['minutes' => self::FPM_MINUTES]))];
         }
 
         return [];
