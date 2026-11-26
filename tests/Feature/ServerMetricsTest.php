@@ -374,6 +374,7 @@ class ServerMetricsTest extends TestCase
             ->assertSee($other->name)
             ->assertSee('12.5%')
             ->assertSee('/boot/efi')
+            ->assertSeeInOrder(['The machine', '4 cores', '8 GB', '2 GB', '/', '100 GB', '/boot/efi', '512 MB'])
             ->assertDontSee('Forget the server');
 
         $this->actingAs($this->viewer())

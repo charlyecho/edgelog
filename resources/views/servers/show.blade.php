@@ -40,6 +40,10 @@
             @endforelse
         </x-card>
 
+        @if ($range->latest() !== null)
+            @include('servers.machine')
+        @endif
+
         @include('servers.software')
 
         @if ($range->latest() === null)
